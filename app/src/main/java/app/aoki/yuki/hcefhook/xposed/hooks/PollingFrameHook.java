@@ -1,5 +1,7 @@
 package app.aoki.yuki.hcefhook.xposed.hooks;
 
+import android.content.Context;
+
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
@@ -17,6 +19,9 @@ import app.aoki.yuki.hcefhook.xposed.LogBroadcaster;
  * This hook intercepts those notifications to detect SENSF_REQ.
  * 
  * Target: NfcService or NfcDispatcher classes that handle polling frames
+ * 
+ * NOTE: This code runs in the com.android.nfc process context, NOT the app's context.
+ * Communication with the main app must use IPC (Broadcast, ContentProvider).
  */
 public class PollingFrameHook {
     
@@ -25,12 +30,22 @@ public class PollingFrameHook {
     // Callback for SENSF_REQ detection
     private static SensfReqCallback callback;
     
+    // Context from hooked process (com.android.nfc)
+    private static Context hookedContext;
+    
     public interface SensfReqCallback {
         void onSensfReqDetected(byte[] reqData, int systemCode);
     }
     
     public static void setCallback(SensfReqCallback cb) {
         callback = cb;
+    }
+    
+    /**
+     * Set context obtained from hooked process
+     */
+    public static void setHookedContext(Context context) {
+        hookedContext = context;
     }
     
     /**
@@ -212,21 +227,56 @@ public class PollingFrameHook {
                 callback.onSensfReqDetected(frameData, systemCode);
             }
             
-            // Attempt to inject SENSF_RES
-            triggerSensfResInjection(broadcaster);
+            // Attempt to inject SENSF_RES (using hooked process context for IPC)
+            triggerSensfResInjection(broadcaster, hookedContext);
         }
     }
     
     /**
      * Trigger SENSF_RES injection after detecting wildcard poll
+     * 
+     * NOTE: This runs in the hooked process (com.android.nfc) context.
+     * We cannot directly call app methods. Use IPC via ContentProvider.
      */
-    private static void triggerSensfResInjection(LogBroadcaster broadcaster) {
+    private static void triggerSensfResInjection(LogBroadcaster broadcaster, Context context) {
         byte[] sensfRes = SensfResBuilder.buildDefault();
         String resHex = SensfResBuilder.toHexString(sensfRes);
         broadcaster.info("Prepared SENSF_RES: " + resHex);
         
-        // The actual injection happens via SendRawFrameHook
-        // by calling NFA_SendRawFrame with state bypass enabled
-        SendRawFrameHook.injectSensfRes(sensfRes);
+        // Check if auto-inject is enabled via IPC
+        if (context != null) {
+            try {
+                app.aoki.yuki.hcefhook.ipc.IpcClient ipcClient = 
+                    new app.aoki.yuki.hcefhook.ipc.IpcClient(context);
+                
+                if (ipcClient.isAutoInjectEnabled()) {
+                    // Get custom IDm/PMm if configured
+                    byte[] customIdm = ipcClient.getIdm();
+                    byte[] customPmm = ipcClient.getPmm();
+                    
+                    if (customIdm != null && customPmm != null) {
+                        sensfRes = new SensfResBuilder()
+                            .setIdm(customIdm)
+                            .setPmm(customPmm)
+                            .build();
+                        broadcaster.info("Using custom IDm/PMm from config");
+                    }
+                    
+                    // Attempt injection via SendRawFrameHook
+                    SendRawFrameHook.injectSensfRes(sensfRes);
+                } else {
+                    broadcaster.info("Auto-inject disabled, queuing for manual injection");
+                    // Queue for manual injection from app
+                    ipcClient.queueInjection(sensfRes);
+                }
+            } catch (Exception e) {
+                broadcaster.error("IPC failed: " + e.getMessage());
+                // Fallback to direct injection attempt
+                SendRawFrameHook.injectSensfRes(sensfRes);
+            }
+        } else {
+            // No context, try direct injection
+            SendRawFrameHook.injectSensfRes(sensfRes);
+        }
     }
 }

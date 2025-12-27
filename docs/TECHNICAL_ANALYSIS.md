@@ -51,29 +51,62 @@ SC=0xFFFF（ワイルドカード）のポーリングに対し、通常のHCE-F
 
 調査の結果、**複数階層でのブロッキング**が確認されました：
 
-### 2.1 レイヤー1: NFA (NFC Forum Adaptation) レイヤー
+### 2.1 レイヤー1: NFA (NFC Forum Adaptation) レイヤー - 主要ブロック
 
-**ファイル**: `nfa_dm_discover.cc`
-**関数**: `nfa_dm_is_data_exchange_allowed()`
+**ファイル**: `nfa_dm_act.cc` (実際のAOSPソース)
+**関数**: `nfa_dm_act_send_raw_frame()`
 
 ```cpp
-bool nfa_dm_is_data_exchange_allowed(void) {
-    uint8_t state = nfa_dm_cb.disc_cb.disc_state;
-    
-    // BLOCKING: Only POLL_ACTIVE or LISTEN_ACTIVE allow TX
-    if (state != NFA_DM_RFST_POLL_ACTIVE && 
-        state != NFA_DM_RFST_LISTEN_ACTIVE) {
-        return false;  // ← Observe Modeではここでブロック
-    }
-    return true;
+// From AOSP nfa_dm_act.cc lines 1168-1197
+bool nfa_dm_act_send_raw_frame(tNFA_DM_MSG* p_data) {
+  tNFC_STATUS status = NFC_STATUS_FAILED;
+
+  /* If NFC link is activated */
+  if ((nfa_dm_cb.disc_cb.disc_state == NFA_DM_RFST_POLL_ACTIVE) ||
+      (nfa_dm_cb.disc_cb.disc_state == NFA_DM_RFST_LISTEN_ACTIVE)) {
+    nfa_dm_cb.flags |= NFA_DM_FLAGS_RAW_FRAME;
+    // ... data transmission proceeds ...
+    status = NFC_SendData(NFC_RF_CONN_ID, (NFC_HDR*)p_data);
+  }
+
+  if (status == NFC_STATUS_FAILED) {
+    // BLOCKED: State check failed, data not sent
+    return true;  // Free buffer, operation failed
+  }
+  return false;
 }
 ```
 
 **問題点**: 
 - Observe Modeでは状態が`NFA_DM_RFST_DISCOVERY (0x01)`のまま
-- `LISTEN_ACTIVE (0x05)`に遷移しないため、この関数が常にfalseを返す
+- `POLL_ACTIVE (0x04)` または `LISTEN_ACTIVE (0x05)`でないと送信処理に入らない
+- **これが主要なブロッキングポイント**
 
-### 2.2 レイヤー2: NCI (NFC Controller Interface) レイヤー
+### 2.2 レイヤー2: NFA_SendRawFrame() API
+
+**ファイル**: `nfa_dm_api.cc`
+**関数**: `NFA_SendRawFrame()` (lines 931-965)
+
+```cpp
+tNFA_STATUS NFA_SendRawFrame(uint8_t* p_raw_data, uint16_t data_len,
+                             uint16_t presence_check_start_delay) {
+  // Parameter validation only - no state check here
+  if ((data_len == 0) || (p_raw_data == nullptr))
+    return (NFA_STATUS_INVALID_PARAM);
+    
+  // Create message and send to NFA message queue
+  p_msg->event = NFA_DM_API_RAW_FRAME_EVT;
+  nfa_sys_sendmsg(p_msg);
+  return (NFA_STATUS_OK);  // Always succeeds if params valid
+}
+```
+
+**特徴**:
+- API自体は状態チェックなし
+- メッセージをキューに送信するだけ
+- 実際のブロックは `nfa_dm_act_send_raw_frame()` で発生
+
+### 2.3 レイヤー3: NCI (NFC Controller Interface) レイヤー
 
 **ファイル**: `nci_hmsgs.cc`
 **関数**: `nci_snd_data()`
@@ -97,7 +130,7 @@ tNCI_STATUS nci_snd_data(uint8_t conn_id, BT_HDR* p_buf) {
 - `nfc_state`は通常`NFC_STATE_OPEN`だが、接続IDの検証で失敗する可能性
 - Observe Modeでは有効な接続が確立されていない
 
-### 2.3 レイヤー3: HAL (Hardware Abstraction Layer)
+### 2.4 レイヤー4: HAL (Hardware Abstraction Layer)
 
 **ファイル**: `nfc_hal_api.h`
 **関数**: `hal_nfc_write()`
@@ -113,7 +146,7 @@ int hal_nfc_write(uint16_t data_len, uint8_t* p_data) {
 - HAL層自体は状態チェックをほとんど行わない
 - しかし、NFCCファームウェアがパケットを検証する可能性あり
 
-### 2.4 レイヤー4: NFCC Firmware
+### 2.5 レイヤー5: NFCC Firmware
 
 **推測される動作**:
 - NFCCの内部ステートマシンがRF状態を管理

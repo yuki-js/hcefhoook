@@ -3,6 +3,9 @@
 
     <!-- NFC Permission -->
     <uses-permission android:name="android.permission.NFC" />
+    
+    <!-- For reading system state -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
 
     <application
         android:allowBackup="true"
@@ -29,6 +32,13 @@
                 <action android:name="app.aoki.yuki.hcefhook.SENSF_DETECTED" />
             </intent-filter>
         </receiver>
+        
+        <!-- IPC Provider for cross-process communication with hooks -->
+        <provider
+            android:name=".ipc.HookIpcProvider"
+            android:authorities="app.aoki.yuki.hcefhook.ipc"
+            android:exported="true"
+            android:grantUriPermissions="true" />
 
         <!-- Xposed Module Metadata -->
         <meta-data

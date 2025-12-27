@@ -10,7 +10,7 @@
     <androidx.cardview.widget.CardView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
+        android:layout_marginBottom="12dp"
         app:cardCornerRadius="8dp"
         app:cardElevation="4dp">
 
@@ -18,74 +18,145 @@
             android:id="@+id/statusText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:padding="16dp"
-            android:textSize="14sp"
+            android:padding="12dp"
+            android:textSize="13sp"
             android:fontFamily="monospace"
             android:text="Status: Initializing..." />
     </androidx.cardview.widget.CardView>
 
-    <!-- IDm Input -->
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="IDm (8 bytes hex):"
-        android:textStyle="bold" />
-
-    <EditText
-        android:id="@+id/idmInput"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:hint="11451419198100000"
-        android:fontFamily="monospace"
-        android:inputType="textCapCharacters"
-        android:maxLength="16" />
-
-    <!-- PMm Input -->
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:text="PMm (8 bytes hex):"
-        android:textStyle="bold" />
-
-    <EditText
-        android:id="@+id/pmmInput"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:hint="FFFFFFFFFFFFFFFF"
-        android:fontFamily="monospace"
-        android:inputType="textCapCharacters"
-        android:maxLength="16" />
-
-    <!-- Buttons -->
+    <!-- Configuration Section -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
-        android:orientation="horizontal">
+        android:orientation="horizontal"
+        android:layout_marginBottom="8dp">
+
+        <!-- IDm Input -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:layout_marginEnd="8dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="IDm (8B hex)"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/idmInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="1145141919810000"
+                android:fontFamily="monospace"
+                android:inputType="textCapCharacters"
+                android:maxLength="16"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- PMm Input -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="PMm (8B hex)"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+
+            <EditText
+                android:id="@+id/pmmInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="FFFFFFFFFFFFFFFF"
+                android:fontFamily="monospace"
+                android:inputType="textCapCharacters"
+                android:maxLength="16"
+                android:textSize="12sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Toggle Options -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="8dp">
+
+        <CheckBox
+            android:id="@+id/autoInjectCheck"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Auto-Inject"
+            android:textSize="12sp" />
+
+        <CheckBox
+            android:id="@+id/bypassCheck"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
+            android:text="State Bypass"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/statsText"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:gravity="end"
+            android:textSize="11sp"
+            android:text="Injections: 0" />
+    </LinearLayout>
+
+    <!-- Action Buttons -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="12dp">
 
         <Button
             android:id="@+id/testButton"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginEnd="8dp"
-            android:text="Test SENSF_RES" />
+            android:layout_marginEnd="4dp"
+            android:text="Test"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/injectButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="4dp"
+            android:text="Inject"
+            android:textSize="12sp" />
 
         <Button
             android:id="@+id/clearButton"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="Clear Log" />
+            android:layout_marginStart="4dp"
+            android:text="Clear"
+            android:textSize="12sp" />
     </LinearLayout>
 
     <!-- Log Output -->
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="16dp"
         android:text="Log Output:"
+        android:textSize="12sp"
         android:textStyle="bold" />
 
     <ScrollView
@@ -93,15 +164,15 @@
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:layout_marginTop="8dp"
-        android:background="#F0F0F0">
+        android:layout_marginTop="4dp"
+        android:background="#F5F5F5">
 
         <TextView
             android:id="@+id/logText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:padding="8dp"
-            android:textSize="12sp"
+            android:textSize="11sp"
             android:fontFamily="monospace"
             android:textColor="#333333" />
     </ScrollView>

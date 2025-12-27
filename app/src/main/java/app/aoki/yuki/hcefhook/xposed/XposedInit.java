@@ -79,6 +79,19 @@ public class XposedInit implements IXposedHookLoadPackage {
                         appContext = (Context) param.args[0];
                         XposedBridge.log(TAG + ": Got application context");
                         
+                        // Set context for hooks that need IPC
+                        PollingFrameHook.setHookedContext(appContext);
+                        SendRawFrameHook.setHookedContext(appContext);
+                        
+                        // Notify main app that hook is active via IPC
+                        try {
+                            app.aoki.yuki.hcefhook.ipc.IpcClient ipcClient = 
+                                new app.aoki.yuki.hcefhook.ipc.IpcClient(appContext);
+                            ipcClient.setHookActive(true);
+                        } catch (Exception e) {
+                            XposedBridge.log(TAG + ": Failed to notify app: " + e.getMessage());
+                        }
+                        
                         if (broadcaster != null) {
                             broadcaster.info("HCE-F hooks installed for: " + lpparam.packageName);
                         }

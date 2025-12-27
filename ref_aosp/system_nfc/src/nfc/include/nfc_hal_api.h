@@ -1,201 +1,70 @@
-/*
- * Copyright (C) 2010-2014 NXP Semiconductors
- * Copyright (C) 2017 The Android Open Source Project
+/******************************************************************************
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ *  Copyright (C) 2012-2014 Broadcom Corporation
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at:
  *
- * REFERENCE FILE: AOSP system/nfc HAL Interface
- * This file shows the HAL layer interface for NFC communication.
- * Critical for understanding the lowest level access points.
- */
+ *  http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ *
+ ******************************************************************************/
 
+/******************************************************************************
+ *
+ *  NFC Hardware Abstraction Layer API
+ *
+ ******************************************************************************/
 #ifndef NFC_HAL_API_H
 #define NFC_HAL_API_H
+#include "data_types.h"
+#include "hardware_nfc.h"
+#include "nfc_hal_target.h"
 
-#include <stdint.h>
-
-/*******************************************************************************
- * HAL INTERFACE OVERVIEW
- * 
- * The HAL (Hardware Abstraction Layer) is the lowest software layer
- * before the NFC Controller (NFCC) firmware.
- * 
- * Data flow:
- * Application -> NFA -> NCI -> HAL -> NFCC Firmware -> RF Frontend
- * 
- * For SENSF_RES injection, intercepting at HAL level provides:
- * - Bypass of all software state checks
- * - Direct packet transmission to NFCC
- * - But NFCC firmware may still reject packets based on its state
- ******************************************************************************/
-
-/*******************************************************************************
- * HAL CALLBACK TYPES
- ******************************************************************************/
-typedef void(tHAL_NFC_STATUS_CBACK)(uint8_t event, uint8_t status);
-typedef void(tHAL_NFC_CBACK)(uint8_t event, uint16_t data_len, uint8_t* p_data);
+typedef uint8_t tHAL_NFC_STATUS;
+typedef void(tHAL_NFC_STATUS_CBACK)(tHAL_NFC_STATUS status);
+typedef void(tHAL_NFC_CBACK)(uint8_t event, tHAL_NFC_STATUS status);
 typedef void(tHAL_NFC_DATA_CBACK)(uint16_t data_len, uint8_t* p_data);
 
 /*******************************************************************************
- * HAL EVENTS
- ******************************************************************************/
-#define HAL_NFC_OPEN_CPLT_EVT           0x00
-#define HAL_NFC_CLOSE_CPLT_EVT          0x01
-#define HAL_NFC_POST_INIT_CPLT_EVT      0x02
-#define HAL_NFC_PRE_DISCOVER_CPLT_EVT   0x03
-#define HAL_NFC_REQUEST_CONTROL_EVT     0x04
-#define HAL_NFC_RELEASE_CONTROL_EVT     0x05
-#define HAL_NFC_ERROR_EVT               0x06
+** tHAL_NFC_ENTRY HAL entry-point lookup table
+*******************************************************************************/
 
-/*******************************************************************************
- * HAL FUNCTION POINTERS
- * 
- * These are the key functions implemented by the HAL module.
- ******************************************************************************/
+typedef void(tHAL_API_INITIALIZE)(void);
+typedef void(tHAL_API_TERMINATE)(void);
+typedef void(tHAL_API_OPEN)(tHAL_NFC_CBACK* p_hal_cback,
+                            tHAL_NFC_DATA_CBACK* p_data_cback);
+typedef void(tHAL_API_CLOSE)(void);
+typedef void(tHAL_API_CORE_INITIALIZED)(uint16_t data_len,
+                                        uint8_t* p_core_init_rsp_params);
+typedef void(tHAL_API_WRITE)(uint16_t data_len, uint8_t* p_data);
+typedef bool(tHAL_API_PREDISCOVER)(void);
+typedef void(tHAL_API_CONTROL_GRANTED)(void);
+typedef void(tHAL_API_POWER_CYCLE)(void);
+typedef uint8_t(tHAL_API_GET_MAX_NFCEE)(void);
+
 typedef struct {
-    /*
-     * HAL_NfcOpen
-     * Opens the NFC stack and initializes hardware.
-     */
-    void (*open)(tHAL_NFC_CBACK* p_hal_cback, 
-                 tHAL_NFC_DATA_CBACK* p_data_cback);
-    
-    /*
-     * HAL_NfcClose
-     * Closes the NFC stack.
-     */
-    void (*close)(void);
-    
-    /*
-     * HAL_NfcCoreInitialized
-     * Called after core initialization is complete.
-     */
-    void (*core_initialized)(uint16_t data_len, uint8_t* p_core_init_rsp);
-    
-    /*
-     * HAL_NfcWrite
-     * 
-     * CRITICAL FUNCTION FOR INJECTION:
-     * This function writes data directly to the NFCC.
-     * It bypasses NCI and NFA layer checks.
-     * 
-     * However, the NFCC firmware validates packets and may reject
-     * malformed or unexpected packets.
-     * 
-     * Parameters:
-     *   data_len: Length of data to write
-     *   p_data: Pointer to NCI packet (including header)
-     * 
-     * Returns:
-     *   Number of bytes written
-     */
-    int (*write)(uint16_t data_len, uint8_t* p_data);
-    
-    /*
-     * HAL_NfcPreDiscover
-     * Called before RF discovery starts.
-     */
-    int (*prediscover)(void);
-    
-    /*
-     * HAL_NfcControlGranted
-     * Called when control of NFC is granted (for power management).
-     */
-    void (*control_granted)(void);
-    
-    /*
-     * HAL_NfcPowerCycle
-     * Power cycles the NFC controller.
-     */
-    void (*power_cycle)(void);
-    
-    /*
-     * HAL_NfcGetMaxNfcee
-     * Returns maximum number of NFCEEs supported.
-     */
-    int (*get_max_nfcee)(void);
-    
+  tHAL_API_INITIALIZE* initialize;
+  tHAL_API_TERMINATE* terminate;
+  tHAL_API_OPEN* open;
+  tHAL_API_CLOSE* close;
+  tHAL_API_CORE_INITIALIZED* core_initialized;
+  tHAL_API_WRITE* write;
+  tHAL_API_PREDISCOVER* prediscover;
+  tHAL_API_CONTROL_GRANTED* control_granted;
+  tHAL_API_POWER_CYCLE* power_cycle;
+  tHAL_API_GET_MAX_NFCEE* get_max_ee;
+
 } tHAL_NFC_ENTRY;
 
 /*******************************************************************************
- * HAL WRITE IMPLEMENTATION REFERENCE
- * 
- * This is how a typical HAL write implementation looks.
- * The write function sends NCI packets directly to NFCC.
- ******************************************************************************/
-/*
-int hal_nfc_write(uint16_t data_len, uint8_t* p_data) {
-    int ret;
-    
-    // Write to NFC transport (I2C/SPI/UART)
-    ret = transport_write(nfc_dev_node, p_data, data_len);
-    
-    if (ret < 0) {
-        LOG(ERROR) << "HAL write failed: " << ret;
-        return 0;
-    }
-    
-    return ret;
-}
-*/
+** HAL API Function Prototypes
+*******************************************************************************/
 
-/*******************************************************************************
- * DIRECT HAL ACCESS FOR SENSF_RES INJECTION
- * 
- * RESEARCH: BYPASS STRATEGY
- * 
- * If we can obtain a pointer to the HAL write function, we can:
- * 1. Construct a raw NCI data packet containing SENSF_RES
- * 2. Call HAL write directly, bypassing NCI/NFA state checks
- * 
- * Method to obtain HAL pointer:
- * - The HAL entry point is stored in nfc_hal_entry (global)
- * - Can be accessed via dlsym() or memory inspection
- * - Frida can easily hook and use this function
- * 
- * Packet construction:
- * - NCI Data packet header: [conn_id][credits][len]
- * - Payload: SENSF_RES frame
- * 
- * However: NFCC firmware state machine may still reject the packet
- * if it doesn't expect data in current RF state.
- ******************************************************************************/
-
-/*******************************************************************************
- * EXAMPLE: Direct SENSF_RES injection via HAL
- ******************************************************************************/
-/*
-void inject_sensf_res_via_hal(uint8_t* idm, uint8_t* pmm) {
-    uint8_t nci_pkt[32];
-    uint8_t* p = nci_pkt;
-    
-    // NCI Data Header
-    *p++ = NCI_STATIC_RF_CONN_ID;  // conn_id = 0
-    *p++ = 0;                       // credits
-    *p++ = 17;                      // length (SENSF_RES len)
-    
-    // SENSF_RES payload
-    *p++ = 17;      // Length byte
-    *p++ = 0x01;    // Response code
-    memcpy(p, idm, 8); p += 8;
-    memcpy(p, pmm, 8); p += 8;
-    
-    // Direct HAL write
-    nfc_hal_entry->write(p - nci_pkt, nci_pkt);
-}
-*/
-
-/*******************************************************************************
- * HAL GLOBAL REFERENCE
- * 
- * In libnfc-nci.so, the HAL entry point is typically stored in:
- * - nfc_hal_entry (pointer to tHAL_NFC_ENTRY)
- * - Can be found by searching for symbol or pattern matching
- ******************************************************************************/
-extern tHAL_NFC_ENTRY* nfc_hal_entry;
-
-#endif /* NFC_HAL_API_H */
+#endif /* NFC_HAL_API_H  */

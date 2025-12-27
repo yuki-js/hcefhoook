@@ -1,0 +1,7 @@
+[
+{
+  "directory": "/home/runner/work/hcefhoook/hcefhoook/app/.cxx/Debug/2x192z3t/arm64-v8a",
+  "command": "/usr/local/lib/android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++ --target=aarch64-none-linux-android28 --sysroot=/usr/local/lib/android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/linux-x86_64/sysroot -Dhcefhook_EXPORTS -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security  -std=c++17 -fno-limit-debug-info  -fPIC -o CMakeFiles/hcefhook.dir/native_hook.cpp.o -c /home/runner/work/hcefhoook/hcefhoook/app/src/main/cpp/native_hook.cpp",
+  "file": "/home/runner/work/hcefhoook/hcefhoook/app/src/main/cpp/native_hook.cpp"
+}
+]

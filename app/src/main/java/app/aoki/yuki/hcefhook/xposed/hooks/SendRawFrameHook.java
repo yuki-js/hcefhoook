@@ -1,5 +1,7 @@
 package app.aoki.yuki.hcefhook.xposed.hooks;
 
+import android.content.Context;
+
 import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -21,10 +23,15 @@ import app.aoki.yuki.hcefhook.xposed.LogBroadcaster;
  * Key targets:
  * - NativeNfcManager.doTransceive() - Java JNI wrapper
  * - Native: NFA_SendRawFrame() in libnfc-nci.so (requires Frida)
+ * 
+ * NOTE: This code runs in the com.android.nfc process context.
  */
 public class SendRawFrameHook {
     
     private static final String TAG = "HcefHook.SendRaw";
+    
+    // Context from hooked process
+    private static Context hookedContext;
     
     // Pending SENSF_RES to inject
     private static byte[] pendingInjection = null;
@@ -34,6 +41,13 @@ public class SendRawFrameHook {
     private static Object nativeNfcManagerInstance = null;
     private static Method sendRawFrameMethod = null;
     private static Method transceiveMethod = null;
+    
+    /**
+     * Set context obtained from hooked process
+     */
+    public static void setHookedContext(Context context) {
+        hookedContext = context;
+    }
     
     /**
      * Queue a SENSF_RES for injection
