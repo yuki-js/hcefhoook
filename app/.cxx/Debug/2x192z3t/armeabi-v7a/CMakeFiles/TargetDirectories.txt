@@ -1,3 +1,0 @@
-/home/runner/work/hcefhoook/hcefhoook/app/.cxx/Debug/2x192z3t/armeabi-v7a/CMakeFiles/hcefhook.dir
-/home/runner/work/hcefhoook/hcefhoook/app/.cxx/Debug/2x192z3t/armeabi-v7a/CMakeFiles/edit_cache.dir
-/home/runner/work/hcefhoook/hcefhoook/app/.cxx/Debug/2x192z3t/armeabi-v7a/CMakeFiles/rebuild_cache.dir

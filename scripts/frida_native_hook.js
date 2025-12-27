@@ -10,13 +10,16 @@
  * 
  * Or attach to running NFC service:
  *   frida -U com.android.nfc -l frida_native_hook.js
+ * 
+ * WARNING: This is research code. Default values are for testing only.
+ * Configure your own IDm/PMm values before use.
  */
 
 'use strict';
 
 const LIBNFC = "libnfc-nci.so";
 
-// State constants
+// State constants (from nfa_dm_int.h)
 const NFA_DM_RFST_IDLE = 0x00;
 const NFA_DM_RFST_DISCOVERY = 0x01;
 const NFA_DM_RFST_LISTEN_ACTIVE = 0x05;
@@ -24,7 +27,9 @@ const NFA_DM_RFST_LISTEN_ACTIVE = 0x05;
 // SENSF_RES command code
 const SENSF_RES_CMD = 0x01;
 
-// Default injection parameters
+// Default injection parameters (TEST VALUES ONLY - configure your own)
+// IDm: 8-byte identifier (示例値:野獣先輩の誕生日1145141919)
+// PMm: 8-byte parameters (最大能力を示す)
 const DEFAULT_IDM = [0x11, 0x45, 0x14, 0x19, 0x19, 0x81, 0x00, 0x00];
 const DEFAULT_PMM = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
 
@@ -32,6 +37,7 @@ const DEFAULT_PMM = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
 let nfaDmCbAddr = null;
 let bypassEnabled = false;
 let pendingInjection = null;
+let initialized = false;
 
 console.log("===========================================");
 console.log("  HCE-F Hook - Frida Native Bypass Script");
@@ -243,6 +249,11 @@ function listExports() {
 
 // Initialize hooks
 function init() {
+    if (initialized) {
+        console.log("[*] Already initialized");
+        return;
+    }
+    
     console.log("[*] Initializing hooks...\n");
     
     // Wait for libnfc to load
@@ -256,35 +267,17 @@ function init() {
             hookSendRawFrame();
             hookPollingFrameNotification();
             
+            initialized = true;
+            
             console.log("\n[+] Hooks installed successfully!");
             console.log("[*] Use rpc.exports.inject() to inject SENSF_RES");
+            console.log("[*] Use rpc.exports.enableBypass() to enable state bypass");
             console.log("[*] Use rpc.exports.listExports() to see available functions\n");
         }
     }, 100);
 }
 
-// RPC exports for external control
-rpc.exports = {
-    inject: function(idmHex, pmmHex) {
-        const idm = idmHex ? hexToBytes(idmHex) : DEFAULT_IDM;
-        const pmm = pmmHex ? hexToBytes(pmmHex) : DEFAULT_PMM;
-        injectSensfRes(idm, pmm);
-    },
-    
-    enableBypass: function() {
-        bypassEnabled = true;
-        console.log("[*] Bypass enabled");
-    },
-    
-    disableBypass: function() {
-        bypassEnabled = false;
-        console.log("[*] Bypass disabled");
-    },
-    
-    listExports: listExports
-};
-
-// Utility function
+// Utility function (defined early for use by RPC exports)
 function hexToBytes(hex) {
     const bytes = [];
     for (let i = 0; i < hex.length; i += 2) {
@@ -293,5 +286,52 @@ function hexToBytes(hex) {
     return bytes;
 }
 
-// Start initialization
-init();
+// RPC exports for external control
+rpc.exports = {
+    // Initialize hooks manually (call this if auto-init fails)
+    init: function() {
+        if (!initialized) {
+            init();
+        }
+    },
+    
+    // Inject SENSF_RES with optional custom IDm/PMm
+    inject: function(idmHex, pmmHex) {
+        const idm = idmHex ? hexToBytes(idmHex) : DEFAULT_IDM;
+        const pmm = pmmHex ? hexToBytes(pmmHex) : DEFAULT_PMM;
+        injectSensfRes(idm, pmm);
+    },
+    
+    // Enable state bypass for data transmission
+    enableBypass: function() {
+        bypassEnabled = true;
+        console.log("[*] State bypass enabled");
+        console.log("[!] WARNING: Security checks disabled for research purposes");
+    },
+    
+    // Disable state bypass
+    disableBypass: function() {
+        bypassEnabled = false;
+        console.log("[*] State bypass disabled");
+    },
+    
+    // Check if bypass is enabled
+    isBypassEnabled: function() {
+        return bypassEnabled;
+    },
+    
+    // Check if initialized
+    isInitialized: function() {
+        return initialized;
+    },
+    
+    listExports: listExports
+};
+
+// Delayed auto-initialization (allows RPC init to be called manually if needed)
+setTimeout(function() {
+    if (!initialized) {
+        console.log("[*] Auto-initializing...");
+        init();
+    }
+}, 500);

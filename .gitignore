@@ -37,6 +37,14 @@ captures/
 # External native build folder generated in Android Studio 2.2 and later
 .externalNativeBuild/
 
+# CMake build directories
+.cxx/
+app/.cxx/
+
+# Native build artifacts
+*.o
+*.so
+
 # Google Services (e.g. APIs or Firebase)
 google-services.json
 
