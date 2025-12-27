@@ -34,8 +34,9 @@ SENSF_REQ (リーダーから):
 例: 06 00 FF FF 00 03
 
 SENSF_RES (タグ/エミュレータから):
-[Length(1B)] [Cmd:01] [IDm(8B)] [PMm(8B)] [RD(opt)]
-例: 12 01 02FE010203040506 00F0FFD2FE1F1F00
+[Length(1B)] [Cmd:01] [IDm(8B)] [PMm(8B)] [RD(0-2B opt)]
+例: 11 01 02FE010203040506 00F0FFD2FE1F1F00
+     ^-- Length = 17 (0x11) = 1(cmd) + 8(IDm) + 8(PMm) = 17バイト
 ```
 
 ### 1.3 問題の核心

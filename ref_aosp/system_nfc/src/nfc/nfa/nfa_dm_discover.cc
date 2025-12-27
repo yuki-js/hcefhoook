@@ -98,10 +98,11 @@ void nfa_dm_set_observe_mode_config(bool enable) {
         /*
          * ANDROID OBSERVE MODE EXTENSION:
          * Vendor-specific parameter to enable polling frame notifications
+         * Value: 0 = disabled, 1 = enabled
          */
         UINT8_TO_STREAM(p, NCI_PARAM_ID_ANDROID_OBSERVE_MODE);
         UINT8_TO_STREAM(p, 1);  // length
-        UINT8_TO_STREAM(p, 1);  // value: enable
+        UINT8_TO_STREAM(p, 1);  // value: 1 = enable observe mode
 
         LOG(INFO) << "Observe Mode configuration applied";
     } else {

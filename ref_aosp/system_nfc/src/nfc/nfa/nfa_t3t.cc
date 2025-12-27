@@ -27,7 +27,8 @@
  * 
  * Frame Structure:
  * SENSF_REQ: [Length][0x00][SC_H][SC_L][RC][TSN]
- * SENSF_RES: [Length][0x01][IDm 8B][PMm 8B][RD 2B opt]
+ * SENSF_RES: [Length][0x01][IDm 8B][PMm 8B][RD 0-2B opt]
+ * Note: Length byte = total frame size in bytes
  ******************************************************************************/
 
 /*******************************************************************************
@@ -150,7 +151,9 @@ void nfa_t3t_build_sensf_res(uint8_t* p_idm, uint8_t* p_pmm,
     // Omitted for basic response
     
     // Update length byte
+    // Length byte contains total frame size (including length byte itself)
     *p_len = p - p_buffer;
+    // For FeliCa, length byte = total bytes in frame
     p_buffer[0] = *p_len;
 }
 
