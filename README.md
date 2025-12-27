@@ -19,25 +19,62 @@
 ```
 hcefhoook/
 ├── README.md                    # This file
+├── app/                         # Android PoC Application
+│   └── src/main/
+│       ├── java/app/aoki/yuki/hcefhook/
+│       │   ├── core/            # Core utilities (Constants, SensfResBuilder)
+│       │   ├── ui/              # MainActivity for UI
+│       │   └── xposed/          # Xposed module hooks
+│       │       └── hooks/       # Individual hook implementations
+│       ├── res/                 # Android resources
+│       └── AndroidManifest.xml  # App manifest with Xposed metadata
+├── scripts/
+│   └── frida_native_hook.js    # Frida script for native layer bypass
 ├── docs/
 │   ├── TECHNICAL_ANALYSIS.md    # 詳細な技術分析
 │   └── HOOK_TARGETS.md          # フック対象関数リファレンス
-└── ref_aosp/
-    ├── system_nfc/              # AOSP system/nfc 参照コード
-    │   └── src/nfc/
-    │       ├── nci/
-    │       │   ├── nci_hmsgs.cc    # NCI command/data functions
-    │       │   └── nci_hrcv.cc     # NCI notification handling
-    │       ├── nfa/
-    │       │   ├── nfa_dm_discover.cc  # Discovery state machine
-    │       │   └── nfa_t3t.cc      # NFC-F/T3T handling
-    │       └── include/
-    │           ├── nci_defs.h      # NCI protocol definitions
-    │           ├── nfa_dm_int.h    # NFA internal structures
-    │           └── nfc_hal_api.h   # HAL interface
-    └── packages_apps_nfc/        # AOSP packages/apps/Nfc 参照コード
-        └── src/
-            └── NfcObserveMode.java  # Observe Mode documentation
+├── ref_aosp/                    # AOSP NFC stack reference files
+│   ├── system_nfc/              # system/nfc source excerpts
+│   └── packages_apps_nfc/       # packages/apps/Nfc excerpts
+├── .github/workflows/
+│   └── build.yml               # GitHub Actions CI
+├── build.gradle                # Root Gradle config
+└── app/build.gradle            # App Gradle config
+```
+
+## PoC Application
+
+### 機能
+
+- **Xposed Module**: NFC Service (com.android.nfc) をフックしてObserve Mode下での操作を可能にする
+- **SENSF_REQ Detection**: ワイルドカード (SC=FFFF) のポーリングを検知
+- **State Bypass**: NFA/NCI層の状態チェックをバイパス
+- **SENSF_RES Injection**: カスタムIDm/PMmを持つ応答を注入
+
+### ビルド方法
+
+```bash
+# Debug APK
+./gradlew assembleDebug
+
+# Release APK
+./gradlew assembleRelease
+```
+
+### インストール
+
+1. LSPosed Framework がインストールされた root済みデバイスが必要
+2. APKをインストール
+3. LSPosedで本モジュールを有効化
+4. ターゲットに `com.android.nfc` を設定
+5. デバイスを再起動
+
+### Frida Script (Native Layer)
+
+Xposedでは到達できないネイティブ層のフックには、Frida scriptを使用:
+
+```bash
+frida -U -f com.android.nfc -l scripts/frida_native_hook.js --no-pause
 ```
 
 ## 主要な調査結果
@@ -62,7 +99,9 @@ hcefhoook/
 
 - **デバイス**: Google Pixel (Android 14/15)
 - **権限**: Root権限取得済み
-- **ツール**: Frida, Xposed/LSPosed, Native Hooking Library (Dobby等)
+- **ツール**: 
+  - Frida (native hooks)
+  - LSPosed/Xposed Framework (Java/Kotlin hooks)
 
 ## 参考資料
 
