@@ -152,3 +152,56 @@ PoC（注入）を作らずに、追加で確度を上げる調査ポイント�
 - **(C) NFC-F（T3T）に関するAOSPのListen設定（LF_T3T_*）の整理**  
   `nfa_dm_act.cc` が初期値として `LF_T3T_IDENTIFIERS_*`/`LF_T3T_PMM` 相当をセットしている点があるため、Listen Fの構成とObserveの関係を切り分ける
 
+---
+
+## 7. 追加調査：NFC-F（HCE-F/OffHost）ルーティングとSystemCode routingの実装（AOSP）
+
+このセクションは、あなたの背景課題「`SC=0xFFFF`のポーリングでeSEが固定IDmを返す」現象を、**AOSPのルーティング設計**の観点で“起こりやすい条件”として整理するための材料です（`SC=0xFFFF`そのものの注入/回避手順は扱いません）。
+
+### 7.1 Apps側：HCE-Fの“SystemCode/T3T識別子”はコントローラへ登録して運用する
+
+`SystemCodeRoutingManager` は、HCE-Fのために `T3tIdentifier(systemCode, nfcid2, t3tPmm)` の増減を管理し、増減分を `NfcService.registerT3tIdentifier()/deregisterT3tIdentifier()` に委譲します。
+
+- `SystemCodeRoutingManager.configureRouting()`  
+  - 追加：`NfcService.getInstance().registerT3tIdentifier(systemCode, nfcid2, t3tPmm)`
+  - 削除：`NfcService.getInstance().deregisterT3tIdentifier(systemCode, nfcid2, t3tPmm)`
+  - 最後に `commitRouting()`
+
+この時点で、AOSPのHCE-Fは「Hostが任意応答を作る」より先に、**NFCCのルーティング表・Listen-F識別子登録**に依存していることが分かります。
+
+### 7.2 JNI側：`registerT3tIdentifier()` は“DH上のFeliCa SystemCode登録”＋“SystemCode routing登録”を行う
+
+`RoutingManager::registerT3tIdentifier()`（JNI/C++）は、受け取ったT3T Identifier（SystemCode + NFCID2 + PMm）を分解して、次の2つを行います。
+
+- `NFA_CeRegisterFelicaSystemCodeOnDH(systemCode, nfcid2, t3tPmm, ...)`  
+  → **DH（ホスト）側のListen-F（FeliCa）識別子登録**
+- `NFA_EeAddSystemCodeRouting(systemCode, NCI_DH_ID, SYS_CODE_PWR_STATE_HOST)`（SCBRサポート時）  
+  → **SystemCode routingをDHへ向けて追加**
+
+これが意味するのは、AOSPの想定するHCE-Fは「Observeで受信だけ見てホストが勝手にSENSF_RESを返す」ではなく、**“事前にSystemCode/NFCID2/PMmを登録し、RFルーティングでDHへ選択される状態を作った上で”動く**設計だという点です。
+
+### 7.3 デフォルトのNFC-Fルート（`NAME_DEFAULT_NFCF_ROUTE`）がeSE側にあると、ポーリングがeSEへ吸われやすい
+
+`RoutingManager` は `NAME_DEFAULT_NFCF_ROUTE`（`mDefaultFelicaRoute`）を設定として読み込み、EE情報（SEの対応Tech）と合わせて **NFC-FのTech/Protoルーティング**を組み立てます。
+
+このため、端末設定（`libnfc-nci.conf` や OEM overlay）で **NFC-FのデフォルトルートがeSE** になっていると、
+
+- Observe Modeを使わない通常系では、ポーリング（特にwildcard側）が **eSEへ到達して応答**しやすい
+- Host側がHCE-Fとして介入するには、上記の **SystemCode routing / T3T識別子登録**でDHへ寄せる必要がある
+
+…という構図が、AOSPのルーティング実装と整合します。
+
+#### 7.3.1 AOSP実装の要点：SEがNFC-F対応なら“DHのFルートは消される”
+
+`RoutingManager::updateEeTechRouteSetting()` は、`NAME_DEFAULT_NFCF_ROUTE`で指定されたEEが **実際に`lf_protocol`を持つ（NFC-F対応）**場合、そのEEに対して `NFA_EeSetDefaultTechRouting(..., NFA_TECHNOLOGY_MASK_F, ...)` を構成します。  
+その結果、`allSeTechMask`に `NFA_TECHNOLOGY_MASK_F` が立つと、最後に **DH側のNFC-F Techルートを明示的にクリア**します。
+
+この動きは「端末がeSEでNFC-Fを扱える」構成だと、AOSPが **HostへFをルートしない（あるいは最小化する）**方向に倒れる、という意味になります。`SC=0xFFFF`のwildcardポーリングが“ホストで制御できない”状況を作りやすい条件として重要です。
+
+### 7.4 SystemCode routing（SCBR）はAOSP的に“サポート有無”があり、挙動が端末依存になり得る
+
+`RoutingManager::updateDefaultRoute()` では `NFA_EeAddSystemCodeRouting(mDefaultSysCode, mDefaultSysCodeRoute, ...)` を呼び、戻りが `NFA_STATUS_NOT_SUPPORTED` の場合は「SCBR not supported」として扱います。
+
+つまり、SystemCode routingは **NCI2.0かつNFCC側サポート前提**で、端末により **ルーティングの効き方（DHへ寄せられるか）が変わりうる**ことが、AOSPコード上からも示唆されます。
+
+
