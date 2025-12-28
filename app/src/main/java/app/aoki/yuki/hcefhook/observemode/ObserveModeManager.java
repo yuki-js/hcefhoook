@@ -282,20 +282,37 @@ public class ObserveModeManager {
     
     /**
      * Set callback for SENSF_REQ detection
+     * 
+     * NOTE: This callback mechanism is NOT used in the current architecture due to process isolation.
+     * Detection is handled via IPC: PollingFrameHook -> LogBroadcaster -> LogReceiver -> MainActivity.onSensfDetected()
+     * 
+     * This method is kept for potential future use or alternative architectures.
+     * 
+     * @deprecated Use IPC-based detection via LogReceiver instead
      */
+    @Deprecated
     public static void setSensfReqCallback(SensfReqCallback callback) {
         sensfReqCallback = callback;
-        Log.i(TAG, "SENSF_REQ callback registered");
+        Log.i(TAG, "SENSF_REQ callback registered (NOTE: IPC-based detection is preferred)");
     }
     
     /**
      * Process incoming polling frame notification
      * 
-     * This should be called by the Xposed hook when NCI_ANDROID_POLLING_FRAME_NTF is received
+     * NOTE: This method is NOT called in the current architecture due to process isolation.
+     * ObserveModeManager runs in app process, but polling frames are received in android.nfc process.
+     * Detection is handled via IPC: PollingFrameHook -> LogBroadcaster -> LogReceiver
+     * 
+     * This method is kept for reference and potential future use.
      * 
      * @param pollingFrame The raw polling frame data
+     * @deprecated Not used - detection happens in PollingFrameHook via IPC
      */
+    @Deprecated
     public static void onPollingFrameReceived(byte[] pollingFrame) {
+        Log.w(TAG, "onPollingFrameReceived() called - this should not happen in current architecture!");
+        Log.w(TAG, "Detection should be via IPC: PollingFrameHook -> LogBroadcaster -> LogReceiver");
+        
         if (pollingFrame == null || pollingFrame.length < 6) {
             Log.w(TAG, "Invalid polling frame: " + 
                   (pollingFrame == null ? "null" : "len=" + pollingFrame.length));
@@ -322,12 +339,12 @@ public class ObserveModeManager {
                 Log.i(TAG, "*** TRIGGERING RESPONSE INJECTION ***");
             }
             
-            // Notify callback
+            // Notify callback (will be null in android.nfc process)
             if (sensfReqCallback != null) {
                 Log.d(TAG, "Invoking SENSF_REQ callback...");
                 sensfReqCallback.onSensfReqDetected(pollingFrame, systemCode);
             } else {
-                Log.w(TAG, "No SENSF_REQ callback registered!");
+                Log.w(TAG, "No SENSF_REQ callback registered (expected in android.nfc process)");
             }
         } else {
             Log.d(TAG, "Not a SENSF_REQ (cmd=" + 

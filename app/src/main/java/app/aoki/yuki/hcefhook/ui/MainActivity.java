@@ -106,8 +106,10 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
     }
     
     /**
-     * Initialize ObserveModeManager and set up callback
-     * CRITICAL INTEGRATION: Connects MainActivity to ObserveModeManager
+     * Initialize ObserveModeManager for NFC Observe Mode control
+     * CRITICAL INTEGRATION: Initializes ObserveModeManager in app process
+     * Note: ObserveModeManager is for Observe Mode control only.
+     * SENSF_REQ detection is handled via IPC (LogBroadcaster -> LogReceiver -> onSensfDetected)
      */
     private void initializeObserveModeManager() {
         appendLog("INFO", "=== Initializing Observe Mode Manager ===");
@@ -115,50 +117,11 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         boolean success = ObserveModeManager.initialize(this);
         if (success) {
             appendLog("INFO", "✓ ObserveModeManager initialized successfully");
-            
-            // CRITICAL: Register callback for SENSF_REQ detection
-            ObserveModeManager.setSensfReqCallback((reqData, systemCode) -> {
-                runOnUiThread(() -> {
-                    String msg = String.format("*** SENSF_REQ Detected via ObserveModeManager ***\n  SystemCode: 0x%04X\n  Data: %s",
-                        systemCode, SensfResBuilder.toHexString(reqData));
-                    appendLog("DETECT", msg);
-                    
-                    Toast.makeText(this, "SENSF_REQ SC=0x" + 
-                        Integer.toHexString(systemCode).toUpperCase(), Toast.LENGTH_LONG).show();
-                    
-                    // Trigger SENSF_RES injection based on mode
-                    if (autoInjectCheck != null && autoInjectCheck.isChecked()) {
-                        appendLog("INFO", "Auto-inject enabled - preparing SENSF_RES");
-                        
-                        try {
-                            String idmHex = idmInput.getText().toString().replace(" ", "").toUpperCase();
-                            String pmmHex = pmmInput.getText().toString().replace(" ", "").toUpperCase();
-                            
-                            byte[] idm = hexToBytes(idmHex);
-                            byte[] pmm = hexToBytes(pmmHex);
-                            
-                            byte[] sensfRes = new SensfResBuilder()
-                                .setIdm(idm)
-                                .setPmm(pmm)
-                                .build();
-                            
-                            // Queue injection via IPC - hook will decide spray vs single-shot
-                            // based on DobbyHooks.isSprayModeEnabled()
-                            appendLog("INFO", "Queuing SENSF_RES injection");
-                            ipcClient.queueInjection(sensfRes);
-                        } catch (Exception e) {
-                            appendLog("ERROR", "Failed to prepare SENSF_RES: " + e.getMessage());
-                        }
-                    } else {
-                        appendLog("INFO", "Auto-inject disabled - user action required");
-                    }
-                });
-            });
-            
-            appendLog("INFO", "✓ SENSF_REQ callback registered");
+            appendLog("INFO", "✓ Observe Mode control is now available");
+            appendLog("INFO", "  Note: SENSF_REQ detection uses IPC (android.nfc -> app process)");
         } else {
             appendLog("ERROR", "✗ ObserveModeManager initialization failed");
-            appendLog("WARN", "  Observe Mode features may not work");
+            appendLog("WARN", "  Observe Mode control may not work");
         }
     }
     
@@ -402,6 +365,44 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
             Toast.makeText(this, "SENSF_REQ detected! SC=0x" + 
                 Integer.toHexString(systemCode).toUpperCase(), Toast.LENGTH_LONG).show();
             updateStatus();
+            
+            // CRITICAL: Auto-inject SENSF_RES if enabled
+            if (autoInjectCheck != null && autoInjectCheck.isChecked()) {
+                appendLog("INFO", "Auto-inject enabled - preparing SENSF_RES");
+                
+                try {
+                    String idmHex = idmInput.getText().toString().replace(" ", "").toUpperCase();
+                    String pmmHex = pmmInput.getText().toString().replace(" ", "").toUpperCase();
+                    
+                    byte[] idm = hexToBytes(idmHex);
+                    byte[] pmm = hexToBytes(pmmHex);
+                    
+                    if (idm.length != 8 || pmm.length != 8) {
+                        appendLog("ERROR", "IDm and PMm must be exactly 8 bytes each");
+                        return;
+                    }
+                    
+                    byte[] sensfRes = new SensfResBuilder()
+                        .setIdm(idm)
+                        .setPmm(pmm)
+                        .build();
+                    
+                    // Queue injection via IPC - hook will decide spray vs single-shot
+                    // based on DobbyHooks.isSprayModeEnabled()
+                    appendLog("INFO", "Queuing SENSF_RES injection");
+                    boolean success = ipcClient.queueInjection(sensfRes);
+                    
+                    if (success) {
+                        appendLog("INFO", "SENSF_RES queued successfully");
+                    } else {
+                        appendLog("ERROR", "Failed to queue SENSF_RES");
+                    }
+                } catch (Exception e) {
+                    appendLog("ERROR", "Failed to prepare SENSF_RES: " + e.getMessage());
+                }
+            } else {
+                appendLog("INFO", "Auto-inject disabled - user action required");
+            }
         });
     }
     
