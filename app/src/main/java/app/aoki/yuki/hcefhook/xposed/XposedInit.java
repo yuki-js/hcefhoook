@@ -83,6 +83,24 @@ public class XposedInit implements IXposedHookLoadPackage {
                         PollingFrameHook.setHookedContext(appContext);
                         SendRawFrameHook.setHookedContext(appContext);
                         
+                        // Initialize Dobby native hooks in android.nfc process
+                        // CRITICAL: This ensures hooks run in the correct process context
+                        if (lpparam.packageName.equals("com.android.nfc")) {
+                            try {
+                                XposedBridge.log(TAG + ": Installing Dobby native hooks in android.nfc process");
+                                boolean success = app.aoki.yuki.hcefhook.nativehook.DobbyHooks.install();
+                                if (success) {
+                                    XposedBridge.log(TAG + ": Dobby hooks installed successfully");
+                                    app.aoki.yuki.hcefhook.nativehook.DobbyHooks.logStatus();
+                                } else {
+                                    XposedBridge.log(TAG + ": WARNING: Dobby hooks installation failed");
+                                }
+                            } catch (Throwable dobbyError) {
+                                XposedBridge.log(TAG + ": Dobby hook error: " + dobbyError.getMessage());
+                                dobbyError.printStackTrace();
+                            }
+                        }
+                        
                         // Notify main app that hook is active via IPC
                         try {
                             app.aoki.yuki.hcefhook.ipc.IpcClient ipcClient = 
