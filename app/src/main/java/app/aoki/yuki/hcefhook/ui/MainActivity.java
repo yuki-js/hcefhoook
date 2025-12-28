@@ -28,7 +28,6 @@ import app.aoki.yuki.hcefhook.core.LogReceiver;
 import app.aoki.yuki.hcefhook.core.SensfResBuilder;
 import app.aoki.yuki.hcefhook.ipc.HookIpcProvider;
 import app.aoki.yuki.hcefhook.ipc.IpcClient;
-import app.aoki.yuki.hcefhook.observemode.ObserveModeManager;
 
 /**
  * Main activity for HCE-F Hook PoC
@@ -97,14 +96,12 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         appendLog("INFO", "MainActivity.onCreate() - Starting initialization");
         appendLog("DEBUG", "IPC client initialized");
         
-        // CRITICAL INTEGRATION: Initialize ObserveModeManager
-        initializeObserveModeManager();
-        
         updateStatus();
         
         appendLog("INFO", "HCE-F Hook PoC started");
         appendLog("INFO", "Device: " + Build.MODEL + " (Android " + Build.VERSION.RELEASE + ")");
-        appendLog("INFO", "Waiting for hook activation...");
+        appendLog("INFO", "Waiting for Xposed hook activation...");
+        appendLog("WARN", "Observe Mode control happens via Xposed hooks in com.android.nfc process");
     }
     
     /**
@@ -113,19 +110,6 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
      * Note: ObserveModeManager is for Observe Mode control only.
      * SENSF_REQ detection is handled via IPC (LogBroadcaster -> LogReceiver -> onSensfDetected)
      */
-    private void initializeObserveModeManager() {
-        appendLog("INFO", "=== Initializing Observe Mode Manager ===");
-        
-        boolean success = ObserveModeManager.initialize(this);
-        if (success) {
-            appendLog("INFO", "✓ ObserveModeManager initialized successfully");
-            appendLog("INFO", "✓ Observe Mode control is now available");
-            appendLog("INFO", "  Note: SENSF_REQ detection uses IPC (android.nfc -> app process)");
-        } else {
-            appendLog("ERROR", "✗ ObserveModeManager initialization failed");
-            appendLog("WARN", "  Observe Mode control may not work");
-        }
-    }
     
     private void initViews() {
         statusText = findViewById(R.id.statusText);
