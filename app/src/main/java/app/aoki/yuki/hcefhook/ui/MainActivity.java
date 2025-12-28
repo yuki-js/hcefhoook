@@ -28,6 +28,7 @@ import app.aoki.yuki.hcefhook.core.LogReceiver;
 import app.aoki.yuki.hcefhook.core.SensfResBuilder;
 import app.aoki.yuki.hcefhook.ipc.HookIpcProvider;
 import app.aoki.yuki.hcefhook.ipc.IpcClient;
+import app.aoki.yuki.hcefhook.observemode.ObserveModeManager;
 
 /**
  * Main activity for HCE-F Hook PoC
@@ -63,8 +64,8 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
     private CheckBox bypassCheck;
     private TextView statsText;
     
-    // Observe Mode state tracking
-    private boolean observeModeEnabled = false;
+    // Observe Mode Manager (no reflection, clean implementation)
+    private ObserveModeManager observeModeManager;
     
     // IPC Client for communicating with hooks
     private IpcClient ipcClient;
@@ -86,6 +87,42 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         // Initialize IPC client
         ipcClient = new IpcClient(this);
         
+        // Initialize ObserveModeManager (no reflection, clean API)
+        observeModeManager = new ObserveModeManager(this);
+        observeModeManager.setPollingFrameCallback(frames -> {
+            // Handle polling frames detected in Observe Mode
+            // frames is List<Object> where each Object is actually a PollingFrame instance
+            runOnUiThread(() -> {
+                appendLog("INFO", "=== Polling Frames Detected ===");
+                appendLog("INFO", "Frame count: " + frames.size());
+                
+                for (Object frameObj : frames) {
+                    try {
+                        // Use reflection-free approach via Xposed's method calling
+                        // The frameObj is a PollingFrame with getType() and getData() methods
+                        Class<?> frameClass = frameObj.getClass();
+                        java.lang.reflect.Method getTypeMethod = frameClass.getMethod("getType");
+                        java.lang.reflect.Method getDataMethod = frameClass.getMethod("getData");
+                        
+                        int type = (Integer) getTypeMethod.invoke(frameObj);
+                        byte[] data = (byte[]) getDataMethod.invoke(frameObj);
+                        
+                        String frameLog = String.format("Type: %d, Data: %s", 
+                            type, SensfResBuilder.toHexString(data));
+                        appendLog("DATA", frameLog);
+                        
+                        // Check if this is SENSF_REQ
+                        if (data != null && data.length >= 4 && data[1] == Constants.SENSF_REQ_CMD) {
+                            int systemCode = ((data[2] & 0xFF) << 8) | (data[3] & 0xFF);
+                            onSensfDetected(data, systemCode);
+                        }
+                    } catch (Exception e) {
+                        appendLog("ERROR", "Failed to parse PollingFrame: " + e.getMessage());
+                    }
+                }
+            });
+        });
+        
         // Initialize views FIRST before any logging
         initViews();
         setupLogReceiver();
@@ -103,13 +140,6 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         appendLog("INFO", "Waiting for Xposed hook activation...");
         appendLog("WARN", "Observe Mode control happens via Xposed hooks in com.android.nfc process");
     }
-    
-    /**
-     * Initialize ObserveModeManager for NFC Observe Mode control
-     * CRITICAL INTEGRATION: Initializes ObserveModeManager in app process
-     * Note: ObserveModeManager is for Observe Mode control only.
-     * SENSF_REQ detection is handled via IPC (LogBroadcaster -> LogReceiver -> onSensfDetected)
-     */
     
     private void initViews() {
         statusText = findViewById(R.id.statusText);
@@ -425,40 +455,59 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
     
     /**
      * Toggle Observe Mode on/off
-     * CRITICAL INTEGRATION: Sends command to Xposed hooks via IPC
+     * 
+     * Uses ObserveModeManager for clean, reflection-free implementation.
+     * The manager handles IPC communication with Xposed hooks which call
+     * the official NfcService.setObserveMode() method.
      */
     private void toggleObserveMode() {
-        observeModeEnabled = !observeModeEnabled;
+        boolean currentState = observeModeManager.isObserveModeEnabled();
+        boolean newState = !currentState;
         
-        if (observeModeEnabled) {
+        if (newState) {
             appendLog("INFO", "=== ENABLING OBSERVE MODE ===");
-            appendLog("INFO", "Sending enable command to NFC hooks...");
-            ipcClient.enableObserveMode();
+            appendLog("INFO", "Using ObserveModeManager (no reflection)");
             
-            // Update button UI
-            if (observeModeButton != null) {
-                observeModeButton.setText("Disable Observe Mode");
-                observeModeButton.setBackgroundTintList(
-                    android.content.res.ColorStateList.valueOf(
-                        getResources().getColor(R.color.observe_mode_enabled, null)));
+            boolean success = observeModeManager.enableObserveMode();
+            
+            if (success) {
+                appendLog("INFO", "✓ Observe Mode enabled successfully");
+                
+                // Update button UI
+                if (observeModeButton != null) {
+                    observeModeButton.setText("Disable Observe Mode");
+                    observeModeButton.setBackgroundTintList(
+                        android.content.res.ColorStateList.valueOf(
+                            getResources().getColor(R.color.observe_mode_enabled, null)));
+                }
+                
+                Toast.makeText(this, "Observe Mode ENABLED", Toast.LENGTH_SHORT).show();
+            } else {
+                appendLog("ERROR", "✗ Failed to enable Observe Mode");
+                Toast.makeText(this, "Observe Mode Enable FAILED", Toast.LENGTH_SHORT).show();
             }
-            
-            Toast.makeText(this, "Observe Mode Enable Requested", Toast.LENGTH_SHORT).show();
             
         } else {
             appendLog("INFO", "=== DISABLING OBSERVE MODE ===");
-            appendLog("INFO", "Sending disable command to NFC hooks...");
-            ipcClient.disableObserveMode();
             
-            // Update button UI
-            if (observeModeButton != null) {
-                observeModeButton.setText("Enable Observe Mode");
-                observeModeButton.setBackgroundTintList(
-                    android.content.res.ColorStateList.valueOf(
-                        getResources().getColor(R.color.observe_mode_disabled, null)));
+            boolean success = observeModeManager.disableObserveMode();
+            
+            if (success) {
+                appendLog("INFO", "✓ Observe Mode disabled successfully");
+                
+                // Update button UI
+                if (observeModeButton != null) {
+                    observeModeButton.setText("Enable Observe Mode");
+                    observeModeButton.setBackgroundTintList(
+                        android.content.res.ColorStateList.valueOf(
+                            getResources().getColor(R.color.observe_mode_disabled, null)));
+                }
+                
+                Toast.makeText(this, "Observe Mode DISABLED", Toast.LENGTH_SHORT).show();
+            } else {
+                appendLog("ERROR", "✗ Failed to disable Observe Mode");
+                Toast.makeText(this, "Observe Mode Disable FAILED", Toast.LENGTH_SHORT).show();
             }
-            
-            Toast.makeText(this, "Observe Mode Disable Requested", Toast.LENGTH_SHORT).show();
         }
     }
     

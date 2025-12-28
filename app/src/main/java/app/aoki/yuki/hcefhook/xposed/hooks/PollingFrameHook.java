@@ -109,9 +109,16 @@ public class PollingFrameHook {
                         // Process each PollingFrame
                         for (Object frameObj : frames) {
                             try {
-                                // PollingFrame has: int type, byte[] data
-                                int type = (int) XposedHelpers.getObjectField(frameObj, "mType");
-                                byte[] data = (byte[]) XposedHelpers.getObjectField(frameObj, "mData");
+                                // PollingFrame has public methods: getType() and getData()
+                                // According to android.nfc.cardemulation.PollingFrame API
+                                Class<?> pollingFrameClass = frameObj.getClass();
+                                
+                                // Use public API methods instead of private fields
+                                Object typeObj = XposedHelpers.callMethod(frameObj, "getType");
+                                Object dataObj = XposedHelpers.callMethod(frameObj, "getData");
+                                
+                                int type = (typeObj instanceof Integer) ? (Integer) typeObj : 0;
+                                byte[] data = (dataObj instanceof byte[]) ? (byte[]) dataObj : new byte[0];
                                 
                                 broadcaster.debug("PollingFrame: type=" + type + ", data=" + 
                                     SensfResBuilder.toHexString(data));

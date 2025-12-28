@@ -227,7 +227,12 @@ public class SendRawFrameHook {
     }
     
     /**
-     * Hook NfcService send methods
+     * Hook NfcService for data transmission monitoring
+     * 
+     * According to AOSP NfcService.java line 4437:
+     *   public boolean sendData(byte[] data)
+     * 
+     * This is the official method for sending raw NFC data.
      */
     private static void hookNfcServiceSend(LoadPackageParam lpparam, LogBroadcaster broadcaster) {
         Class<?> nfcServiceClass = XposedHelpers.findClassIfExists(
@@ -237,28 +242,23 @@ public class SendRawFrameHook {
             return;
         }
         
-        // Hook sendData or similar methods
-        String[] sendMethods = {"sendData", "send", "transceive"};
-        
-        for (String methodName : sendMethods) {
-            try {
-                // Try with byte[] parameter
-                XposedHelpers.findAndHookMethod(
-                    nfcServiceClass,
-                    methodName,
-                    byte[].class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                            byte[] data = (byte[]) param.args[0];
-                            broadcaster.debug("NfcService." + methodName + " called, len=" + data.length);
-                        }
+        // Hook the official sendData method (not trial-and-error)
+        try {
+            XposedHelpers.findAndHookMethod(
+                nfcServiceClass,
+                "sendData",
+                byte[].class,
+                new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        byte[] data = (byte[]) param.args[0];
+                        broadcaster.debug("NfcService.sendData called, len=" + data.length);
                     }
-                );
-                broadcaster.debug("Hooked NfcService." + methodName);
-            } catch (NoSuchMethodError e) {
-                // Method not found
-            }
+                }
+            );
+            broadcaster.debug("Hooked NfcService.sendData");
+        } catch (NoSuchMethodError e) {
+            broadcaster.warn("NfcService.sendData method not found");
         }
     }
     
