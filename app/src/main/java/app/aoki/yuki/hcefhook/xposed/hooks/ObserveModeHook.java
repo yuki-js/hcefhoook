@@ -108,49 +108,18 @@ public class ObserveModeHook {
         Class<?> nmClass = nativeNfcManager.getClass();
         XposedBridge.log(TAG + ": Searching for setObserveMode in: " + nmClass.getName());
         
-        // Try common method names for Observe Mode control
-        String[] methodNames = {
-            "setObserveMode",           // Standard naming
-            "enableObserveMode",        // Alternative naming
-            "nfcManager_setObserveMode", // JNI naming convention
-            "doSetObserveMode"          // Alternative JNI naming
-        };
-        
-        for (String methodName : methodNames) {
-            try {
-                setObserveModeMethod = nmClass.getMethod(methodName, boolean.class);
-                setObserveModeMethod.setAccessible(true);
-                XposedBridge.log(TAG + ": ✓ Found method: " + methodName);
-                broadcaster.info("Observe Mode method found: " + methodName);
-                return;
-            } catch (NoSuchMethodException e) {
-                // Try next method name
-            }
+        // Use the exact method name from AOSP:
+        // From packages/apps/Nfc/nci/jni/NativeNfcManager.cpp:
+        // {"setObserveMode", "(Z)Z", (void*)nfcManager_setObserveMode}
+        try {
+            setObserveModeMethod = nmClass.getMethod("setObserveMode", boolean.class);
+            setObserveModeMethod.setAccessible(true);
+            XposedBridge.log(TAG + ": ✓ Found setObserveMode method");
+            broadcaster.info("Observe Mode method found: setObserveMode");
+        } catch (NoSuchMethodException e) {
+            XposedBridge.log(TAG + ": ✗ setObserveMode method not found");
+            broadcaster.error("setObserveMode method not found - Observe Mode not supported on this device");
         }
-        
-        // If not found, log available methods for debugging
-        XposedBridge.log(TAG + ": ✗ setObserveMode method not found");
-        XposedBridge.log(TAG + ": Available methods in " + nmClass.getName() + ":");
-        
-        Method[] methods = nmClass.getDeclaredMethods();
-        for (Method m : methods) {
-            String methodSignature = m.getName() + "(";
-            Class<?>[] params = m.getParameterTypes();
-            for (int i = 0; i < params.length; i++) {
-                methodSignature += params[i].getSimpleName();
-                if (i < params.length - 1) methodSignature += ", ";
-            }
-            methodSignature += ")";
-            
-            // Log methods that might be related to observe mode
-            if (m.getName().toLowerCase().contains("observe") ||
-                m.getName().toLowerCase().contains("mode") ||
-                m.getName().toLowerCase().contains("polling")) {
-                XposedBridge.log(TAG + ":   → " + methodSignature);
-            }
-        }
-        
-        broadcaster.warn("Observe Mode method not found - feature may not be available");
     }
     
     /**
