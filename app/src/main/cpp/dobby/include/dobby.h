@@ -19,6 +19,8 @@
 #ifndef DOBBY_H
 #define DOBBY_H
 
+#include <stdint.h>  // Required for uintptr_t
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -47,6 +49,34 @@ int DobbyDestroy(void *address);
  * @return Version string
  */
 const char *DobbyGetVersion();
+
+/**
+ * DobbySymbolResolver - Advanced symbol resolution
+ * 
+ * Resolves symbols from loaded modules using:
+ * - ELF parsing
+ * - /proc/self/maps enumeration
+ * - Symbol table analysis
+ * - Fallback to dlsym
+ * 
+ * @param module_name - Name of the module (e.g., "libnfc_nci_jni.so")
+ * @param symbol_name - Symbol to resolve
+ * @return Address of symbol, or NULL if not found
+ */
+void *DobbySymbolResolver(const char *module_name, const char *symbol_name);
+
+/**
+ * Get base address of a loaded module
+ * 
+ * @param module_name - Name of the module
+ * @return Base address, or 0 if not found
+ */
+uintptr_t DobbyGetModuleBase(const char *module_name);
+
+/**
+ * List all installed hooks (for debugging)
+ */
+void DobbyListHooks();
 
 #ifdef __cplusplus
 }
