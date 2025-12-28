@@ -20,6 +20,8 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <stdio.h>
+#include <errno.h>
+#include <stdint.h>
 
 #define TAG "HcefHook.NativeHooks"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -73,18 +75,80 @@ static void* find_symbol_in_lib(void* handle, const char* symbol_name) {
 }
 
 /**
- * Resolve function pointers for monitoring
- * Note: This doesn't actually hook yet - full Dobby integration needed
+ * Memory protection manipulation for hooking
  */
-static bool resolve_functions(void* lib_handle, const char* symbol_name, void** func_ptr) {
+static bool make_memory_writable(void* addr, size_t len) {
+    uintptr_t page_start = ((uintptr_t)addr) & ~(sysconf(_SC_PAGESIZE) - 1);
+    return mprotect((void*)page_start, len + ((uintptr_t)addr - page_start), 
+                    PROT_READ | PROT_WRITE | PROT_EXEC) == 0;
+}
+
+/**
+ * Simple inline hook using trampoline (ARM64)
+ * This patches the target function to jump to our hook
+ */
+static bool install_inline_hook_arm64(void* target, void* hook, void** original) {
+    if (!target || !hook) {
+        LOGE("Invalid hook parameters");
+        return false;
+    }
+    
+    LOGI("Installing inline hook: target=%p, hook=%p", target, hook);
+    
+    // Make target memory writable
+    if (!make_memory_writable(target, 16)) {
+        LOGE("Failed to make memory writable: %s", strerror(errno));
+        return false;
+    }
+    
+    // For ARM64, we need to patch with a branch instruction
+    // This is a simplified implementation - full Dobby would handle edge cases
+    uint32_t* code = (uint32_t*)target;
+    
+    // Save original instructions for trampoline (simplified - just save pointer)
+    *original = target;
+    
+    // Calculate offset from target to hook
+    intptr_t offset = (intptr_t)hook - (intptr_t)target;
+    
+    // Check if we can use a simple branch (within ±128MB)
+    if (offset >= -0x8000000 && offset < 0x8000000) {
+        // ARM64 B instruction: 0x14000000 | ((offset >> 2) & 0x03FFFFFF)
+        uint32_t branch_insn = 0x14000000 | (((offset >> 2) & 0x03FFFFFF));
+        code[0] = branch_insn;
+        
+        LOGI("Installed direct branch hook");
+    } else {
+        // Need indirect jump via register
+        // This requires more complex instruction sequence
+        LOGW("Hook target too far, need indirect jump (not implemented)");
+        return false;
+    }
+    
+    // Flush instruction cache
+    __builtin___clear_cache((char*)target, (char*)target + 16);
+    
+    return true;
+}
+
+/**
+ * Resolve function pointers and optionally install hooks
+ */
+static bool resolve_and_hook_function(void* lib_handle, const char* symbol_name, 
+                                     void* hook_func, void** orig_func) {
     void* target = find_symbol_in_lib(lib_handle, symbol_name);
     if (!target) {
         LOGW("Cannot resolve %s: symbol not found", symbol_name);
         return false;
     }
     
-    *func_ptr = target;
+    *orig_func = target;
     LOGI("Resolved %s at %p", symbol_name, target);
+    
+    // For now, just resolve - actual hooking is dangerous without proper Dobby
+    // We'll use state spoofing instead (safer approach)
+    LOGI("Note: Using state spoofing instead of inline hooks for safety");
+    
     return true;
 }
 
@@ -132,32 +196,62 @@ Java_app_aoki_yuki_hcefhook_nativehook_DobbyHooks_installHooks(JNIEnv *env, jcla
         LOGI("Loaded libnfc_nci_jni.so: %p", libnfc_jni_handle);
     }
     
-    // Resolve function pointers
+    // Resolve function pointers (and hook if safe)
     bool success = true;
     
-    // Function 1: nfa_dm_is_data_exchange_allowed (state check)
-    resolve_functions(libnfc_handle, "nfa_dm_is_data_exchange_allowed",
-                     (void**)&orig_nfa_dm_is_data_exchange_allowed);
+    LOGI("=== Symbol Resolution from SYMBOL_ANALYSIS.md ===");
     
-    // Function 2: nfa_dm_act_send_raw_frame (main send function)
-    resolve_functions(libnfc_handle, "nfa_dm_act_send_raw_frame",
-                     (void**)&orig_nfa_dm_act_send_raw_frame);
-    
-    // Function 3: NFC_SendData (lower-level send)
-    resolve_functions(libnfc_handle, "NFC_SendData",
-                     (void**)&orig_NFC_SendData);
-    
-    // Try alternative symbol names for STMicroelectronics chips
-    if (!orig_NFC_SendData) {
-        LOGI("Trying alternative symbol names...");
-        resolve_functions(libnfc_handle, "nfc_ncif_send_data",
-                         (void**)&orig_NFC_SendData);
+    // Function 1: nfa_dm_act_send_raw_frame (CRITICAL - offset 0x14e070)
+    // This is the PRIMARY hook target identified in symbol analysis
+    resolve_and_hook_function(libnfc_handle, "nfa_dm_act_send_raw_frame",
+                              nullptr, (void**)&orig_nfa_dm_act_send_raw_frame);
+    if (orig_nfa_dm_act_send_raw_frame) {
+        LOGI("✓ PRIMARY TARGET: nfa_dm_act_send_raw_frame resolved");
+    } else {
+        LOGE("✗ CRITICAL: Failed to resolve nfa_dm_act_send_raw_frame!");
     }
     
-    // Try to find NFA discovery control block for state manipulation
+    // Function 2: NFC_SendData (offset 0x183240)
+    resolve_and_hook_function(libnfc_handle, "NFC_SendData",
+                              nullptr, (void**)&orig_NFC_SendData);
+    if (orig_NFC_SendData) {
+        LOGI("✓ SECONDARY TARGET: NFC_SendData resolved");
+    } else {
+        LOGW("✗ NFC_SendData not found, trying alternatives...");
+        // Try alternative names
+        resolve_and_hook_function(libnfc_handle, "nfc_ncif_send_data",
+                                 nullptr, (void**)&orig_NFC_SendData);
+    }
+    
+    // Function 3: nfa_dm_is_data_exchange_allowed (may be inlined)
+    resolve_and_hook_function(libnfc_handle, "nfa_dm_is_data_exchange_allowed",
+                              nullptr, (void**)&orig_nfa_dm_is_data_exchange_allowed);
+    if (orig_nfa_dm_is_data_exchange_allowed) {
+        LOGI("✓ STATE CHECK: nfa_dm_is_data_exchange_allowed resolved");
+    } else {
+        LOGW("✗ nfa_dm_is_data_exchange_allowed not exported (likely inlined)");
+    }
+    
+    LOGI("=== State Control Block Search ===");
+    
+    // CRITICAL: Find nfa_dm_cb for state spoofing (identified in SYMBOL_ANALYSIS.md)
     void* nfa_dm_cb = dlsym(libnfc_handle, "nfa_dm_cb");
     if (nfa_dm_cb) {
-        LOGI("Found nfa_dm_cb at %p - state spoofing may be possible", nfa_dm_cb);
+        LOGI("✓ CRITICAL: Found nfa_dm_cb at %p", nfa_dm_cb);
+        LOGI("✓ State spoofing strategy is VIABLE");
+        LOGI("✓ Can manipulate disc_cb.disc_state for bypass");
+        
+        // Log the first few bytes for verification
+        uint8_t* cb_bytes = (uint8_t*)nfa_dm_cb;
+        LOGI("nfa_dm_cb first 32 bytes:");
+        for (int i = 0; i < 32; i += 8) {
+            LOGI("  +0x%02x: %02x %02x %02x %02x %02x %02x %02x %02x",
+                 i, cb_bytes[i], cb_bytes[i+1], cb_bytes[i+2], cb_bytes[i+3],
+                 cb_bytes[i+4], cb_bytes[i+5], cb_bytes[i+6], cb_bytes[i+7]);
+        }
+    } else {
+        LOGE("✗ CRITICAL: nfa_dm_cb not found - cannot perform state spoofing!");
+        LOGE("✗ State bypass strategy NOT available");
     }
     
     hooks_installed = true;
