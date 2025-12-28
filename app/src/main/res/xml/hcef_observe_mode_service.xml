@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    HCE-F Service Configuration for Observe Mode
+    
+    This XML file declares our HostNfcFService configuration.
+    
+    KEY ELEMENTS:
+    =============
+    1. polling-loop-filter: Declares what polling frames we want to observe
+       - Format: Technology type (e.g., "nfcf" for NFC-F/FeliCa)
+       - Can specify specific system codes or use wildcard
+    
+    2. System handles Observe Mode automatically:
+       - When this service is in foreground, system calls setObserveModeEnabled(true)
+       - Polling frames matching filters are delivered to onPollingLoopDetected()
+       - eSE is silenced - no auto-response
+    
+    REFERENCE:
+    ==========
+    - android-observe-mode-demo repository
+    - Android 15 NFC HCE documentation
+    - AOSP packages/apps/Nfc/HostEmulationManager.java
+-->
+<host-nfcf-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/observe_mode_service_description"
+    android:requireDeviceUnlock="false"
+    android:requireDeviceScreenOn="false">
+    
+    <!--
+        Polling Loop Filter for NFC-F (FeliCa)
+        
+        This filter tells the system we want to observe ALL NFC-F polling frames.
+        Specifically, we want SENSF_REQ with System Code = FFFF (wildcard).
+        
+        The system will:
+        1. Enable Observe Mode when this service is active
+        2. Deliver SENSF_REQ frames to onPollingLoopDetected()
+        3. Silence eSE - no automatic response
+        
+        Format: "technology:filter"
+        - technology: "nfcf" for NFC-F/FeliCa
+        - filter: Can be specific system code or use wildcard pattern
+    -->
+    <polling-loop-filter android:name="nfcf" />
+    
+    <!--
+        Alternative: Specify specific system code
+        <polling-loop-filter android:name="nfcf:FFFF" />
+        
+        But using just "nfcf" captures ALL NFC-F frames, which is what we want
+        for research and analysis purposes.
+    -->
+    
+</host-nfcf-service>

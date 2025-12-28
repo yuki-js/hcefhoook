@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">HCE-F Hook</string>
+    <string name="observe_mode_service_description">Observe Mode for NFC-F polling frame capture. Silences eSE and delivers SENSF_REQ frames to app for analysis and custom response generation.</string>
 </resources>
