@@ -28,6 +28,8 @@ import app.aoki.yuki.hcefhook.core.LogReceiver;
 import app.aoki.yuki.hcefhook.core.SensfResBuilder;
 import app.aoki.yuki.hcefhook.ipc.HookIpcProvider;
 import app.aoki.yuki.hcefhook.ipc.IpcClient;
+import app.aoki.yuki.hcefhook.observemode.ObserveModeManager;
+import app.aoki.yuki.hcefhook.xposed.hooks.SprayController;
 
 /**
  * Main activity for HCE-F Hook PoC
@@ -62,6 +64,10 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
     private CheckBox bypassCheck;
     private TextView statsText;
     
+    // Observe Mode controls
+    private Button observeModeToggleButton;
+    private CheckBox sprayModeCheck;
+    
     // IPC Client for communicating with hooks
     private IpcClient ipcClient;
     
@@ -79,18 +85,88 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         
+        appendLog("INFO", "MainActivity.onCreate() - Starting initialization");
+        
         // Initialize IPC client
         ipcClient = new IpcClient(this);
+        appendLog("DEBUG", "IPC client initialized");
         
         initViews();
         setupLogReceiver();
         setupStatusUpdater();
         loadSavedConfig();
+        
+        // CRITICAL INTEGRATION: Initialize ObserveModeManager
+        initializeObserveModeManager();
+        
         updateStatus();
         
         appendLog("INFO", "HCE-F Hook PoC started");
         appendLog("INFO", "Device: " + Build.MODEL + " (Android " + Build.VERSION.RELEASE + ")");
         appendLog("INFO", "Waiting for hook activation...");
+    }
+    
+    /**
+     * Initialize ObserveModeManager and set up callback
+     * CRITICAL INTEGRATION: Connects MainActivity to ObserveModeManager
+     */
+    private void initializeObserveModeManager() {
+        appendLog("INFO", "=== Initializing Observe Mode Manager ===");
+        
+        boolean success = ObserveModeManager.initialize(this);
+        if (success) {
+            appendLog("INFO", "✓ ObserveModeManager initialized successfully");
+            
+            // CRITICAL: Register callback for SENSF_REQ detection
+            ObserveModeManager.setSensfReqCallback((reqData, systemCode) -> {
+                runOnUiThread(() -> {
+                    String msg = String.format("*** SENSF_REQ Detected via ObserveModeManager ***\n  SystemCode: 0x%04X\n  Data: %s",
+                        systemCode, SensfResBuilder.toHexString(reqData));
+                    appendLog("DETECT", msg);
+                    
+                    Toast.makeText(this, "SENSF_REQ SC=0x" + 
+                        Integer.toHexString(systemCode).toUpperCase(), Toast.LENGTH_LONG).show();
+                    
+                    // Trigger SENSF_RES injection based on mode
+                    if (autoInjectCheck != null && autoInjectCheck.isChecked()) {
+                        appendLog("INFO", "Auto-inject enabled - preparing SENSF_RES");
+                        
+                        try {
+                            String idmHex = idmInput.getText().toString().replace(" ", "").toUpperCase();
+                            String pmmHex = pmmInput.getText().toString().replace(" ", "").toUpperCase();
+                            
+                            byte[] idm = hexToBytes(idmHex);
+                            byte[] pmm = hexToBytes(pmmHex);
+                            
+                            byte[] sensfRes = new SensfResBuilder()
+                                .setIdm(idm)
+                                .setPmm(pmm)
+                                .build();
+                            
+                            // Check if spray mode is enabled
+                            if (sprayModeCheck != null && sprayModeCheck.isChecked()) {
+                                appendLog("INFO", "Spray mode enabled - using continuous transmission");
+                                // Note: Spray mode is triggered via hooks in android.nfc process
+                                // We queue the injection via IPC
+                                ipcClient.queueInjection(sensfRes);
+                            } else {
+                                appendLog("INFO", "Single-shot mode - queuing injection");
+                                ipcClient.queueInjection(sensfRes);
+                            }
+                        } catch (Exception e) {
+                            appendLog("ERROR", "Failed to prepare SENSF_RES: " + e.getMessage());
+                        }
+                    } else {
+                        appendLog("INFO", "Auto-inject disabled - user action required");
+                    }
+                });
+            });
+            
+            appendLog("INFO", "✓ SENSF_REQ callback registered");
+        } else {
+            appendLog("ERROR", "✗ ObserveModeManager initialization failed");
+            appendLog("WARN", "  Observe Mode features may not work");
+        }
     }
     
     private void initViews() {
