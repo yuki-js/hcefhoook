@@ -47,9 +47,36 @@ hcefhoook/
 ### 機能
 
 - **Xposed Module**: NFC Service (com.android.nfc) をフックしてObserve Mode下での操作を可能にする
+- **Observe Mode Manager**: eSE沈黙化とNFCC設定を管理
 - **SENSF_REQ Detection**: ワイルドカード (SC=FFFF) のポーリングを検知
+- **Spray Controller**: 確率的受信成功のための連続送信制御 (2ms間隔で最大20ms)
 - **State Bypass**: NFA/NCI層の状態チェックをバイパス
 - **SENSF_RES Injection**: カスタムIDm/PMmを持つ応答を注入
+- **IPC通信**: MainActivityとXposedフック間の双方向通信
+
+### アーキテクチャ概要
+
+```
+[MainActivity (app process)]
+    ↓ IPC (ContentProvider)
+    ↓ initialize() / callback registration
+[ObserveModeManager]
+    ↓ enable Observe Mode
+[NFCC in Observe Mode]
+    ↓ NCI_ANDROID_POLLING_FRAME_NTF
+[PollingFrameHook (android.nfc process)]
+    ↓ onPollingFrameReceived()
+[ObserveModeManager.onPollingFrameReceived()]
+    ↓ detect SENSF_REQ (SC=FFFF)
+    ↓ trigger callback
+[SENSF_REQ Callback]
+    ↓ queue injection via IPC
+[SendRawFrameHook / SprayController]
+    ↓ inject SENSF_RES (single-shot or spray mode)
+[NativeNfcManager.doTransceive()]
+    ↓ send to NFCC
+[リーダー受信成功 (probabilistic)]
+```
 
 ### ビルド方法
 
