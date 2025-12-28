@@ -233,6 +233,7 @@ Java_app_aoki_yuki_hcefhook_nativehook_DobbyHooks_installHooks(JNIEnv *env, jcla
         // Fallback: Try well-known names
         LOGI("Attempting fallback to well-known library names...");
         const char* fallback_libs[] = {
+            "/system_ext/lib64/libstnfc_nci_jni.so",
             "libstnfc_nci_jni.so",
             "libnfc_nci_jni.so",
             "libnfc-nci.so",
