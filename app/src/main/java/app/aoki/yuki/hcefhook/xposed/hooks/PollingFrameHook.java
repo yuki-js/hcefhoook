@@ -9,18 +9,17 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam;
 
 import app.aoki.yuki.hcefhook.core.Constants;
 import app.aoki.yuki.hcefhook.core.SensfResBuilder;
-import app.aoki.yuki.hcefhook.observemode.ObserveModeManager;
 import app.aoki.yuki.hcefhook.xposed.LogBroadcaster;
 
 /**
  * Hook for polling frame notifications in Observe Mode
  * 
- * When Observe Mode is enabled, the NFCC sends polling frame data
- * to the host via NCI_ANDROID_POLLING_FRAME_NTF notifications.
+ * When Observe Mode is enabled in the NFCC (via Xposed hooks in com.android.nfc process),
+ * the NFCC sends polling frame data to the host via NCI_ANDROID_POLLING_FRAME_NTF notifications.
  * This hook intercepts those notifications to detect SENSF_REQ.
  * 
- * CRITICAL INTEGRATION: This hook feeds polling frames to ObserveModeManager
- * which performs SENSF_REQ detection and triggers response injection.
+ * CRITICAL INTEGRATION: This hook detects SENSF_REQ and sends it to the app via IPC (Broadcast).
+ * The app (MainActivity) then decides whether to auto-inject SENSF_RES.
  * 
  * Target: NfcService or NfcDispatcher classes that handle polling frames
  * 
@@ -206,16 +205,7 @@ public class PollingFrameHook {
         
         broadcaster.debug("Processing polling frame: " + SensfResBuilder.toHexString(frameData));
         
-        // CRITICAL INTEGRATION: Forward to ObserveModeManager for detection
-        try {
-            ObserveModeManager.onPollingFrameReceived(frameData);
-            broadcaster.debug("Polling frame forwarded to ObserveModeManager");
-        } catch (Exception e) {
-            broadcaster.error("Failed to forward to ObserveModeManager: " + e.getMessage());
-            XposedBridge.log(TAG + ": ObserveModeManager forward error: " + e.getMessage());
-        }
-        
-        // LEGACY: Also maintain existing detection logic for compatibility
+        // Parse and detect SENSF_REQ
         // SENSF_REQ format: [Length][0x00][SC_H][SC_L][RC][TSN]
         // Check if this is a SENSF_REQ (cmd = 0x00)
         int cmd = frameData[1] & 0xFF;

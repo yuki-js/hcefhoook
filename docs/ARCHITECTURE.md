@@ -97,6 +97,22 @@ SendRawFrameHook.attemptInjection()
 - ログの表示
 - 手動インジェクションのトリガー
 - 自動インジェクション/バイパスの有効化
+- **ObserveModeManager初期化**: アプリ起動時にObserve Modeマネージャーを初期化
+- **SENSF_REQコールバック登録**: 検出時の自動応答処理を設定
+
+### ObserveModeManager (Observe Mode Layer)
+- **NFCC Observe Mode制御**: NativeNfcManager経由でObserve Modeの有効化/無効化
+- **ポーリングフレーム解析**: NCI_ANDROID_POLLING_FRAME_NTFからSENSF_REQを検出
+- **eSE沈黙化**: Observe Mode有効時にeSEの自動応答を抑止
+- **コールバック管理**: SENSF_REQ検出時のアプリケーション層への通知
+- **状態管理**: Observe Modeのアクティブ状態を追跡
+
+### SprayController (Spray Mode Layer)
+- **連続送信制御**: 2ms間隔でSENSF_RESを最大10回送信
+- **タイミング調整**: Handler + Runnableベースのスケジューリング
+- **確率的成功戦略**: FeliCaの厳密な2.4ms制約を満たせないため、統計的アプローチで対応
+- **State Bypass連携**: NfaStateHookおよびDobbyHooksと連携して送信制約を回避
+- **NativeNfcManager参照**: doTransceive()メソッドを直接呼び出して送信
 
 ### HookIpcProvider (IPC Layer - App Process)
 - ContentProviderとしてアプリプロセスで動作
@@ -118,9 +134,178 @@ SendRawFrameHook.attemptInjection()
 - MainActivityにコールバック
 
 ### Xposed Hooks (Hook Layer)
-- **PollingFrameHook**: ポーリングフレームの検出
+- **PollingFrameHook**: ポーリングフレームの検出、ObserveModeManagerへの転送
 - **NfaStateHook**: NFA状態のバイパス
-- **SendRawFrameHook**: SENSF_RES送信の実行
+- **SendRawFrameHook**: SENSF_RES送信の実行、SprayControllerの統合
+- **NativeHooks (Dobby)**: ネイティブ層でのnfa_dm_cbアクセスと状態操作
+
+## 統合フロー (Integration Flow)
+
+### Complete SENSF_REQ Detection → Response Flow
+
+```
+1. User Action
+   MainActivity.onCreate()
+      │
+      ├─► ObserveModeManager.initialize(context)
+      │      │
+      │      └─► NfcAdapter取得
+      │          NativeNfcManager参照取得 (reflection)
+      │          Observe Mode制御メソッドのキャッシュ
+      │
+      └─► ObserveModeManager.setSensfReqCallback((reqData, sc) -> {...})
+             │
+             └─► コールバック登録完了
+
+2. Observe Mode Activation (Option A: MainActivity UI button)
+   MainActivity: observeModeToggleButton.click()
+      │
+      └─► ObserveModeManager.enableObserveMode()
+             │
+             ├─► Method 1: enableObserveModeMethod.invoke(nativeNfcManager, true)
+             ├─► Method 2: doEnableDiscovery(..., enableObserve=true)
+             └─► Method 3: NfcAdapter.isEnabled() (fallback)
+
+3. リーダーからSENSF_REQ送信
+   Reader sends SENSF_REQ (SC=FFFF)
+      │
+      └─► NFCC receives in Observe Mode
+             │
+             └─► eSE is silenced (no auto-response)
+                    │
+                    └─► NFCC sends NCI_ANDROID_POLLING_FRAME_NTF to Host
+
+4. Xposed Hook Detection (android.nfc process)
+   NfcService.onPollingLoopDetected(frameData)
+      │
+      └─► PollingFrameHook.processPollingFrame(frameData, broadcaster)
+             │
+             ├─► Parse frameData: check if SENSF_REQ (cmd=0x00)
+             ├─► Extract SystemCode: (frameData[2] << 8) | frameData[3]
+             │
+             └─► IF systemCode == 0xFFFF:
+                    │
+                    ├─► broadcaster.info("*** Wildcard SENSF_REQ (SC=FFFF) detected! ***")
+                    │
+                    ├─► CRITICAL INTEGRATION POINT 1 (IPC via Broadcast):
+                    │   broadcaster.notifySensfDetected(frameData, systemCode)
+                    │      │
+                    │      └─► Intent(ACTION_SENSF_DETECTED).sendBroadcast()
+                    │             │
+                    │             └─► Crosses process boundary (android.nfc → app)
+                    │
+                    └─► triggerSensfResInjection(broadcaster, context)
+                           │
+                           └─► IpcClient.isAutoInjectEnabled()
+                                  │
+                                  └─► SendRawFrameHook.injectSensfRes(sensfRes)
+
+5. App Process Reception (IPC Broadcast Receiver)
+   LogReceiver.onReceive(Intent: ACTION_SENSF_DETECTED)
+      │
+      └─► Extract reqData and systemCode from Intent extras
+             │
+             └─► MainActivity.onSensfDetected(reqData, systemCode)
+                    │
+                    ├─► appendLog("DETECT", "*** SENSF_REQ Detected ***")
+                    ├─► Toast.makeText("SENSF_REQ SC=0xFFFF")
+                    │
+                    └─► CRITICAL INTEGRATION POINT 2 (Auto-inject logic):
+                        IF autoInjectCheck.isChecked():
+                           │
+                           ├─► Build SENSF_RES from IDm/PMm inputs
+                           │      new SensfResBuilder().setIdm(idm).setPmm(pmm).build()
+                           │
+                           └─► ipcClient.queueInjection(sensfRes)
+                                  │
+                                  └─► ContentProvider.insert(injection_queue)
+                                         │
+                                         └─► Crosses process boundary (app → android.nfc)
+
+6. Hook-side Injection (android.nfc process)
+   SendRawFrameHook.injectSensfRes(sensfRes)
+      │
+      ├─► CRITICAL INTEGRATION POINT 2:
+      │   Check if DobbyHooks.isSprayModeEnabled()
+      │      │
+      │      └─► IF true:
+      │             SprayController.startSpray(sensfRes)
+      │                │
+      │                ├─► NfaStateHook.spoofListenActiveState()
+      │                ├─► DobbyHooks.enableSprayMode()
+      │                │
+      │                └─► Handler.postDelayed every 2ms:
+      │                       performTransmission()
+      │                          │
+      │                          └─► nativeNfcManagerInstance.doTransceive(sensfRes)
+      │                                 │
+      │                                 └─► NFCC sends RF frame
+      │                                        │
+      │                                        └─► Reader receives (probabilistic)
+      │
+      └─► ELSE (single-shot mode):
+             attemptInjection()
+                │
+                ├─► NfaStateHook.spoofListenActiveState()
+                │
+                └─► transceiveMethod.invoke(nativeNfcManager, sensfRes)
+                       │
+                       └─► NFCC sends RF frame
+                              │
+                              └─► Reader receives
+
+7. Transmission via Native Layer
+   NativeNfcManager.doTransceive(sensfRes, false, responseLen)
+      │
+      └─► JNI: nativeNfcManager_doTransceive()
+             │
+             └─► nfa_dm_act_send_raw_frame() [Symbol 0x14e070]
+                    │
+                    ├─► IF DobbyHooks active:
+                    │      nfa_dm_cb manipulation to bypass state checks
+                    │
+                    └─► NCI_SendData()
+                           │
+                           └─► HAL_WRITE()
+                                  │
+                                  └─► NFCC RF transmission
+
+8. Success/Failure Handling
+   SprayController transmission loop
+      │
+      ├─► Count transmissions (max 10)
+      ├─► Log every 3rd transmission
+      ├─► Stop after 20ms or max transmissions
+      │
+      └─► SprayController.stopSpray()
+             │
+             ├─► NfaStateHook.restoreState()
+             ├─► DobbyHooks.disableSprayMode()
+             └─► Log: "*** SPRAY MODE STOPPED *** Total transmissions: N"
+```
+
+### Critical Integration Points Summary
+
+1. **PollingFrameHook → LogBroadcaster (IPC)** (Line 239 in PollingFrameHook.java)
+   - `broadcaster.notifySensfDetected(frameData, systemCode)` sends Broadcast
+   - Intent crosses process boundary (android.nfc → app)
+   - No direct ObserveModeManager call (deprecated due to process isolation)
+
+2. **LogReceiver → MainActivity** (Line 395 in MainActivity.java)
+   - BroadcastReceiver receives ACTION_SENSF_DETECTED in app process
+   - `MainActivity.onSensfDetected(reqData, systemCode)` callback invoked
+   - Auto-inject logic prepares and queues SENSF_RES via IPC
+
+3. **SendRawFrameHook → SprayController** (Line 64 in SendRawFrameHook.java)
+   - Check `DobbyHooks.isSprayModeEnabled()`
+   - If true: `SprayController.startSpray(sensfRes)`
+   - If false: Single-shot `attemptInjection()`
+
+4. **SendRawFrameHook → NativeNfcManager** (Line 189 in SendRawFrameHook.java)
+   - `cacheTransceiveMethod()` stores transceive method reference
+   - `SprayController.setNativeNfcManager(instance, method)`
+   - SprayController can now call doTransceive directly
+
 
 ## 重要な注意事項
 

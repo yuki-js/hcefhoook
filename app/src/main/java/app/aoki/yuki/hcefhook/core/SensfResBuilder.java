@@ -1,22 +1,29 @@
 package app.aoki.yuki.hcefhook.core;
 
+import android.util.Log;
+
 /**
  * Helper class to build SENSF_RES frames
  */
 public class SensfResBuilder {
+    
+    private static final String TAG = "HcefHook.SensfResBuilder";
     
     private byte[] idm = Constants.DEFAULT_IDM;
     private byte[] pmm = Constants.DEFAULT_PMM;
     private byte[] rd = null;  // Optional Request Data
     
     public SensfResBuilder() {
+        Log.v(TAG, "SensfResBuilder() - Constructor called");
     }
     
     /**
      * Set custom IDm (8 bytes)
      */
     public SensfResBuilder setIdm(byte[] idm) {
+        Log.v(TAG, "setIdm() - Setting IDm: " + toHexString(idm));
         if (idm == null || idm.length != 8) {
+            Log.e(TAG, "setIdm() - Invalid IDm length: " + (idm == null ? "null" : idm.length));
             throw new IllegalArgumentException("IDm must be exactly 8 bytes");
         }
         this.idm = idm.clone();
@@ -27,7 +34,9 @@ public class SensfResBuilder {
      * Set custom PMm (8 bytes)
      */
     public SensfResBuilder setPmm(byte[] pmm) {
+        Log.v(TAG, "setPmm() - Setting PMm: " + toHexString(pmm));
         if (pmm == null || pmm.length != 8) {
+            Log.e(TAG, "setPmm() - Invalid PMm length: " + (pmm == null ? "null" : pmm.length));
             throw new IllegalArgumentException("PMm must be exactly 8 bytes");
         }
         this.pmm = pmm.clone();
@@ -38,7 +47,9 @@ public class SensfResBuilder {
      * Set optional Request Data (0-2 bytes)
      */
     public SensfResBuilder setRd(byte[] rd) {
+        Log.v(TAG, "setRd() - Setting RD: " + toHexString(rd));
         if (rd != null && rd.length > 2) {
+            Log.e(TAG, "setRd() - Invalid RD length: " + rd.length);
             throw new IllegalArgumentException("RD must be 0-2 bytes");
         }
         this.rd = rd != null ? rd.clone() : null;
@@ -50,6 +61,7 @@ public class SensfResBuilder {
      * Format: [Length][0x01][IDm 8B][PMm 8B][RD 0-2B]
      */
     public byte[] build() {
+        Log.d(TAG, "build() - Building SENSF_RES frame");
         int rdLen = (rd != null) ? rd.length : 0;
         int totalLen = 1 + 8 + 8 + rdLen;  // cmd(1) + IDm(8) + PMm(8) + RD(0-2)
         
@@ -75,6 +87,8 @@ public class SensfResBuilder {
             System.arraycopy(rd, 0, frame, offset, rd.length);
         }
         
+        Log.i(TAG, "build() - SENSF_RES built successfully: " + toHexString(frame));
+        Log.d(TAG, "build() - Frame length: " + frame.length + " bytes");
         return frame;
     }
     
@@ -82,6 +96,7 @@ public class SensfResBuilder {
      * Build with default values
      */
     public static byte[] buildDefault() {
+        Log.d(TAG, "buildDefault() - Building default SENSF_RES");
         return new SensfResBuilder().build();
     }
     

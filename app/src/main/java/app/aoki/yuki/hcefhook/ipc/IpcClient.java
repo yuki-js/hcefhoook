@@ -29,19 +29,23 @@ public class IpcClient {
     private final ContentResolver resolver;
     
     public IpcClient(Context context) {
+        Log.v(TAG, "IpcClient() - Constructor called");
         this.context = context;
         this.resolver = context.getContentResolver();
+        Log.d(TAG, "IpcClient() - Initialized with context: " + context.getPackageName());
     }
     
     /**
      * Set a configuration value
      */
     public boolean setConfig(String key, String value) {
+        Log.d(TAG, "setConfig() - key=" + key + ", value=" + value);
         try {
             ContentValues values = new ContentValues();
             values.put("key", key);
             values.put("value", value);
             resolver.insert(CONFIG_URI, values);
+            Log.v(TAG, "setConfig() - Success");
             return true;
         } catch (Exception e) {
             Log.e(TAG, "Failed to set config: " + e.getMessage());
@@ -53,6 +57,7 @@ public class IpcClient {
      * Get a configuration value
      */
     public String getConfig(String key) {
+        Log.v(TAG, "getConfig() - key=" + key);
         try {
             Uri uri = Uri.withAppendedPath(CONFIG_URI, key);
             Cursor cursor = resolver.query(uri, null, null, null, null);
@@ -60,8 +65,10 @@ public class IpcClient {
                 int valueIndex = cursor.getColumnIndex("value");
                 String value = cursor.getString(valueIndex);
                 cursor.close();
+                Log.v(TAG, "getConfig() - Found value: " + value);
                 return value;
             }
+            Log.v(TAG, "getConfig() - No value found");
         } catch (Exception e) {
             Log.e(TAG, "Failed to get config: " + e.getMessage());
         }
@@ -114,11 +121,14 @@ public class IpcClient {
      * Queue a SENSF_RES frame for injection
      */
     public boolean queueInjection(byte[] data) {
+        Log.i(TAG, "queueInjection() - Queuing SENSF_RES: " + bytesToHex(data));
         try {
             ContentValues values = new ContentValues();
             values.put("data", bytesToHex(data));
             Uri result = resolver.insert(INJECTION_URI, values);
-            return result != null;
+            boolean success = result != null;
+            Log.i(TAG, "queueInjection() - " + (success ? "Success" : "Failed"));
+            return success;
         } catch (Exception e) {
             Log.e(TAG, "Failed to queue injection: " + e.getMessage());
             return false;

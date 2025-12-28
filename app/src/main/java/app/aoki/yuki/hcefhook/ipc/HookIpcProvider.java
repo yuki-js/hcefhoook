@@ -63,12 +63,13 @@ public class HookIpcProvider extends ContentProvider {
     
     @Override
     public boolean onCreate() {
-        Log.i(TAG, "IPC Provider created");
+        Log.i(TAG, "onCreate() - IPC Provider created");
         // Initialize default configuration
         configMap.put(KEY_BYPASS_ENABLED, "false");
         configMap.put(KEY_AUTO_INJECT, "false");
         configMap.put(KEY_HOOK_ACTIVE, "false");
         configMap.put(KEY_INJECTION_COUNT, "0");
+        Log.d(TAG, "onCreate() - Default configuration initialized");
         return true;
     }
     
@@ -76,11 +77,13 @@ public class HookIpcProvider extends ContentProvider {
     public Cursor query(Uri uri, String[] projection, String selection,
                         String[] selectionArgs, String sortOrder) {
         
+        Log.v(TAG, "query() - URI: " + uri);
         int match = uriMatcher.match(uri);
         MatrixCursor cursor;
         
         switch (match) {
             case CONFIG:
+                Log.d(TAG, "query() - Returning all config values");
                 // Return all config values
                 cursor = new MatrixCursor(new String[]{"key", "value"});
                 for (String key : configMap.keySet()) {
@@ -91,6 +94,7 @@ public class HookIpcProvider extends ContentProvider {
             case CONFIG_KEY:
                 // Return specific config value
                 String key = uri.getLastPathSegment();
+                Log.d(TAG, "query() - Returning config key: " + key);
                 cursor = new MatrixCursor(new String[]{"key", "value"});
                 String value = configMap.get(key);
                 if (value != null) {
@@ -99,6 +103,7 @@ public class HookIpcProvider extends ContentProvider {
                 return cursor;
                 
             case STATUS:
+                Log.d(TAG, "query() - Returning status");
                 // Return status information
                 cursor = new MatrixCursor(new String[]{"key", "value"});
                 cursor.addRow(new Object[]{"hook_active", configMap.getOrDefault(KEY_HOOK_ACTIVE, "false")});
@@ -109,6 +114,7 @@ public class HookIpcProvider extends ContentProvider {
                 return cursor;
                 
             case INJECTION_QUEUE:
+                Log.d(TAG, "query() - Returning pending injection (queue size: " + injectionQueue.size() + ")");
                 // Return pending injection (for hook to consume)
                 cursor = new MatrixCursor(new String[]{"id", "data"});
                 if (!injectionQueue.isEmpty()) {
@@ -116,17 +122,20 @@ public class HookIpcProvider extends ContentProvider {
                     byte[] data = injectionQueue.remove(id);
                     if (data != null) {
                         cursor.addRow(new Object[]{id, bytesToHex(data)});
+                        Log.i(TAG, "query() - Dequeued injection #" + id);
                     }
                 }
                 return cursor;
                 
             default:
+                Log.e(TAG, "query() - Unknown URI: " + uri);
                 throw new IllegalArgumentException("Unknown URI: " + uri);
         }
     }
     
     @Override
     public Uri insert(Uri uri, ContentValues values) {
+        Log.v(TAG, "insert() - URI: " + uri);
         int match = uriMatcher.match(uri);
         
         switch (match) {
@@ -137,7 +146,7 @@ public class HookIpcProvider extends ContentProvider {
                 String value = values.getAsString("value");
                 if (key != null && value != null) {
                     configMap.put(key, value);
-                    Log.d(TAG, "Config set: " + key + " = " + value);
+                    Log.d(TAG, "insert() - Config set: " + key + " = " + value);
                     getContext().getContentResolver().notifyChange(uri, null);
                 }
                 return uri;
@@ -149,7 +158,7 @@ public class HookIpcProvider extends ContentProvider {
                     byte[] data = hexToBytes(hexData);
                     long id = ++injectionCounter;
                     injectionQueue.put(id, data);
-                    Log.i(TAG, "Queued injection #" + id + ": " + hexData);
+                    Log.i(TAG, "insert() - Queued injection #" + id + ": " + hexData);
                     
                     // Increment injection count
                     int count = Integer.parseInt(configMap.getOrDefault(KEY_INJECTION_COUNT, "0"));
@@ -157,9 +166,11 @@ public class HookIpcProvider extends ContentProvider {
                     
                     return Uri.withAppendedPath(uri, String.valueOf(id));
                 }
+                Log.w(TAG, "insert() - No data provided for injection queue");
                 return null;
                 
             default:
+                Log.e(TAG, "insert() - Unknown URI: " + uri);
                 throw new IllegalArgumentException("Unknown URI: " + uri);
         }
     }

@@ -62,6 +62,10 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
     private CheckBox bypassCheck;
     private TextView statsText;
     
+    // Future UI control for Observe Mode (not yet implemented in layout)
+    // private Button observeModeToggleButton;
+    // private CheckBox sprayModeCheck;
+    
     // IPC Client for communicating with hooks
     private IpcClient ipcClient;
     
@@ -82,16 +86,30 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         // Initialize IPC client
         ipcClient = new IpcClient(this);
         
+        // Initialize views FIRST before any logging
         initViews();
         setupLogReceiver();
         setupStatusUpdater();
         loadSavedConfig();
+        
+        // Now safe to log after views are initialized
+        appendLog("INFO", "MainActivity.onCreate() - Starting initialization");
+        appendLog("DEBUG", "IPC client initialized");
+        
         updateStatus();
         
         appendLog("INFO", "HCE-F Hook PoC started");
         appendLog("INFO", "Device: " + Build.MODEL + " (Android " + Build.VERSION.RELEASE + ")");
-        appendLog("INFO", "Waiting for hook activation...");
+        appendLog("INFO", "Waiting for Xposed hook activation...");
+        appendLog("WARN", "Observe Mode control happens via Xposed hooks in com.android.nfc process");
     }
+    
+    /**
+     * Initialize ObserveModeManager for NFC Observe Mode control
+     * CRITICAL INTEGRATION: Initializes ObserveModeManager in app process
+     * Note: ObserveModeManager is for Observe Mode control only.
+     * SENSF_REQ detection is handled via IPC (LogBroadcaster -> LogReceiver -> onSensfDetected)
+     */
     
     private void initViews() {
         statusText = findViewById(R.id.statusText);
@@ -333,6 +351,44 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
             Toast.makeText(this, "SENSF_REQ detected! SC=0x" + 
                 Integer.toHexString(systemCode).toUpperCase(), Toast.LENGTH_LONG).show();
             updateStatus();
+            
+            // CRITICAL: Auto-inject SENSF_RES if enabled
+            if (autoInjectCheck != null && autoInjectCheck.isChecked()) {
+                appendLog("INFO", "Auto-inject enabled - preparing SENSF_RES");
+                
+                try {
+                    String idmHex = idmInput.getText().toString().replace(" ", "").toUpperCase();
+                    String pmmHex = pmmInput.getText().toString().replace(" ", "").toUpperCase();
+                    
+                    byte[] idm = hexToBytes(idmHex);
+                    byte[] pmm = hexToBytes(pmmHex);
+                    
+                    if (idm.length != 8 || pmm.length != 8) {
+                        appendLog("ERROR", "IDm and PMm must be exactly 8 bytes each");
+                        return;
+                    }
+                    
+                    byte[] sensfRes = new SensfResBuilder()
+                        .setIdm(idm)
+                        .setPmm(pmm)
+                        .build();
+                    
+                    // Queue injection via IPC - hook will decide spray vs single-shot
+                    // based on DobbyHooks.isSprayModeEnabled()
+                    appendLog("INFO", "Queuing SENSF_RES injection");
+                    boolean success = ipcClient.queueInjection(sensfRes);
+                    
+                    if (success) {
+                        appendLog("INFO", "SENSF_RES queued successfully");
+                    } else {
+                        appendLog("ERROR", "Failed to queue SENSF_RES");
+                    }
+                } catch (Exception e) {
+                    appendLog("ERROR", "Failed to prepare SENSF_RES: " + e.getMessage());
+                }
+            } else {
+                appendLog("INFO", "Auto-inject disabled - user action required");
+            }
         });
     }
     
