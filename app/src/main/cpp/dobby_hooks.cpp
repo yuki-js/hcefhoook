@@ -220,13 +220,13 @@ Java_app_aoki_yuki_hcefhook_nativehook_DobbyHooks_installHooks(JNIEnv *env, jcla
     if (!found_nfc_lib || strlen(nfc_lib_name) == 0) {
         LOGE("✗ No NFC library found in loaded modules");
         LOGE("Please ensure NFC service is running");
-        return JNI_FALSE;
+    } else {
+        LOGI("✓ Found NFC library: %s", nfc_lib_name);
+        
+        // Try to open the detected library
+        libnfc_jni_handle = dlopen(nfc_lib_name, RTLD_NOW | RTLD_GLOBAL);
     }
     
-    LOGI("✓ Found NFC library: %s", nfc_lib_name);
-    
-    // Try to open the detected library
-    libnfc_jni_handle = dlopen(nfc_lib_name, RTLD_NOW | RTLD_GLOBAL);
     if (!libnfc_jni_handle) {
         LOGE("Failed to open %s: %s", nfc_lib_name, dlerror());
         
