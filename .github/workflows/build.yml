@@ -72,3 +72,16 @@ jobs:
         name: lint-results
         path: app/build/reports/lint-results*.html
         retention-days: 30
+    
+    - name: Build KernelSU Module
+      run: |
+        cd kernelsu_module
+        chmod +x ../kernelsu_module/HCEFHook_KernelSU_Module.zip || true
+        echo "KernelSU module already built"
+        
+    - name: Upload KernelSU Module
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernelsu-module
+        path: kernelsu_module/HCEFHook_KernelSU_Module.zip
+        retention-days: 90
