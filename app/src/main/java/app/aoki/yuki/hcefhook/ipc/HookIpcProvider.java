@@ -144,6 +144,25 @@ public class HookIpcProvider extends ContentProvider {
                 // Insert/update config value
                 String key = values.getAsString("key");
                 String value = values.getAsString("value");
+                String action = values.getAsString("action");
+                
+                // Handle Observe Mode commands
+                if ("ENABLE_OBSERVE_MODE".equals(action)) {
+                    Log.i(TAG, "insert() - Received ENABLE_OBSERVE_MODE command");
+                    // This will be processed by XposedInit via ObserveModeHook
+                    // Set flag for hook to detect
+                    configMap.put("pending_observe_mode_command", "ENABLE");
+                    getContext().getContentResolver().notifyChange(uri, null);
+                    return uri;
+                }
+                
+                if ("DISABLE_OBSERVE_MODE".equals(action)) {
+                    Log.i(TAG, "insert() - Received DISABLE_OBSERVE_MODE command");
+                    configMap.put("pending_observe_mode_command", "DISABLE");
+                    getContext().getContentResolver().notifyChange(uri, null);
+                    return uri;
+                }
+                
                 if (key != null && value != null) {
                     configMap.put(key, value);
                     Log.d(TAG, "insert() - Config set: " + key + " = " + value);
@@ -231,6 +250,18 @@ public class HookIpcProvider extends ContentProvider {
         if (injectionQueue.isEmpty()) return null;
         Long id = injectionQueue.keySet().iterator().next();
         return injectionQueue.remove(id);
+    }
+    
+    /**
+     * Get and clear pending Observe Mode command
+     * Called by hooks to check if there's a pending command
+     */
+    public static String getPendingObserveModeCommand() {
+        String command = configMap.get("pending_observe_mode_command");
+        if (command != null) {
+            configMap.remove("pending_observe_mode_command");
+        }
+        return command;
     }
     
     // Utility methods

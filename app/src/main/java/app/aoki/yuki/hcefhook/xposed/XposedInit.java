@@ -10,6 +10,7 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam;
 
 import app.aoki.yuki.hcefhook.core.Constants;
 import app.aoki.yuki.hcefhook.xposed.hooks.NfaStateHook;
+import app.aoki.yuki.hcefhook.xposed.hooks.ObserveModeHook;
 import app.aoki.yuki.hcefhook.xposed.hooks.PollingFrameHook;
 import app.aoki.yuki.hcefhook.xposed.hooks.SendRawFrameHook;
 
@@ -125,6 +126,10 @@ public class XposedInit implements IXposedHookLoadPackage {
      * Install hooks for NFC service (com.android.nfc)
      */
     private void installNfcServiceHooks(LoadPackageParam lpparam) {
+        // Hook 0: Observe Mode control
+        // This enables/disables NFC Observe Mode via IPC commands
+        ObserveModeHook.install(lpparam, broadcaster);
+        
         // Hook 1: Polling frame notification handler
         // This detects SENSF_REQ when in Observe Mode
         PollingFrameHook.install(lpparam, broadcaster);
@@ -137,6 +142,55 @@ public class XposedInit implements IXposedHookLoadPackage {
         // This is where we inject our SENSF_RES
         SendRawFrameHook.install(lpparam, broadcaster);
         
+        // Start command polling thread to check for Observe Mode commands
+        startCommandPolling();
+        
         broadcaster.info("All NFC service hooks installed");
+    }
+    
+    /**
+     * Start a background thread to poll for Observe Mode commands
+     */
+    private void startCommandPolling() {
+        new Thread(() -> {
+            XposedBridge.log(TAG + ": Command polling thread started");
+            
+            while (true) {
+                try {
+                    // Check for pending Observe Mode command
+                    String command = app.aoki.yuki.hcefhook.ipc.HookIpcProvider
+                        .getPendingObserveModeCommand();
+                    
+                    if (command != null) {
+                        XposedBridge.log(TAG + ": Processing command: " + command);
+                        
+                        if ("ENABLE".equals(command)) {
+                            boolean success = ObserveModeHook.enableObserveMode();
+                            if (success) {
+                                broadcaster.info("✓ Observe Mode enabled successfully");
+                            } else {
+                                broadcaster.error("✗ Failed to enable Observe Mode");
+                            }
+                        } else if ("DISABLE".equals(command)) {
+                            boolean success = ObserveModeHook.disableObserveMode();
+                            if (success) {
+                                broadcaster.info("✓ Observe Mode disabled successfully");
+                            } else {
+                                broadcaster.error("✗ Failed to disable Observe Mode");
+                            }
+                        }
+                    }
+                    
+                    // Poll every 500ms
+                    Thread.sleep(500);
+                    
+                } catch (InterruptedException e) {
+                    XposedBridge.log(TAG + ": Command polling interrupted");
+                    break;
+                } catch (Exception e) {
+                    XposedBridge.log(TAG + ": Command polling error: " + e.getMessage());
+                }
+            }
+        }).start();
     }
 }

@@ -238,6 +238,38 @@ public class IpcClient {
         return hex != null ? hexToBytes(hex) : null;
     }
     
+    /**
+     * Enable Observe Mode
+     * Sends command to Xposed hooks to enable NFC Observe Mode
+     */
+    public void enableObserveMode() {
+        Log.i(TAG, "enableObserveMode() - Requesting Observe Mode activation");
+        try {
+            ContentValues cv = new ContentValues();
+            cv.put("action", "ENABLE_OBSERVE_MODE");
+            resolver.insert(CONFIG_URI, cv);
+            Log.i(TAG, "enableObserveMode() - Command sent successfully");
+        } catch (Exception e) {
+            Log.e(TAG, "enableObserveMode() - Failed: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Disable Observe Mode
+     * Sends command to Xposed hooks to disable NFC Observe Mode
+     */
+    public void disableObserveMode() {
+        Log.i(TAG, "disableObserveMode() - Requesting Observe Mode deactivation");
+        try {
+            ContentValues cv = new ContentValues();
+            cv.put("action", "DISABLE_OBSERVE_MODE");
+            resolver.insert(CONFIG_URI, cv);
+            Log.i(TAG, "disableObserveMode() - Command sent successfully");
+        } catch (Exception e) {
+            Log.e(TAG, "disableObserveMode() - Failed: " + e.getMessage());
+        }
+    }
+    
     // Utility methods
     
     private static String bytesToHex(byte[] bytes) {
