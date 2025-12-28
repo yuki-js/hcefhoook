@@ -199,18 +199,16 @@ public class XposedInit implements IXposedHookLoadPackage {
                             command = cursor.getString(valueIndex);
                         }
                         cursor.close();
-                        
-                        // Clear the command after reading (delete it)
-                        if (command != null) {
-                            android.content.ContentValues cv = new android.content.ContentValues();
-                            cv.put("key", "pending_observe_mode_command");
-                            cv.put("value", "");  // Clear the command
-                            resolver.insert(commandUri, cv);
-                        }
                     }
                     
                     if (command != null && !command.isEmpty()) {
                         XposedBridge.log(TAG + ": Processing command via IPC: " + command);
+                        
+                        // Clear the command immediately to avoid re-processing
+                        android.content.ContentValues clearCmd = new android.content.ContentValues();
+                        clearCmd.put("key", "pending_observe_mode_command");
+                        clearCmd.put("value", "");
+                        resolver.insert(commandUri, clearCmd);
                         
                         if ("ENABLE".equals(command)) {
                             boolean success = ObserveModeHook.enableObserveMode();
@@ -229,8 +227,8 @@ public class XposedInit implements IXposedHookLoadPackage {
                         }
                     }
                     
-                    // Poll every 500ms
-                    Thread.sleep(500);
+                    // Poll every 1000ms (1 second) to reduce CPU usage
+                    Thread.sleep(1000);
                     
                 } catch (InterruptedException e) {
                     XposedBridge.log(TAG + ": Command polling interrupted");

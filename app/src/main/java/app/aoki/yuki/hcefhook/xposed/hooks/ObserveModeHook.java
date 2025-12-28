@@ -177,7 +177,19 @@ public class ObserveModeHook {
             // Call setObserveMode(true)
             Object result = setObserveModeMethod.invoke(nativeNfcManager, true);
             
-            boolean success = (result instanceof Boolean) ? (Boolean) result : true;
+            // Check result - be conservative with unknown return types
+            boolean success = false;
+            if (result instanceof Boolean) {
+                success = (Boolean) result;
+            } else if (result == null) {
+                // Some methods return void, assume success if no exception
+                success = true;
+            } else {
+                XposedBridge.log(TAG + ": ✗ Unexpected return type: " + result.getClass().getName());
+                broadcaster.warn("Observe Mode returned unexpected type: " + result.getClass().getName());
+                // Conservative: assume failure for unknown types
+                success = false;
+            }
             
             if (success) {
                 XposedBridge.log(TAG + ": ✓✓✓ Observe Mode ENABLED ✓✓✓");
@@ -223,7 +235,19 @@ public class ObserveModeHook {
             // Call setObserveMode(false)
             Object result = setObserveModeMethod.invoke(nativeNfcManager, false);
             
-            boolean success = (result instanceof Boolean) ? (Boolean) result : true;
+            // Check result - be conservative with unknown return types
+            boolean success = false;
+            if (result instanceof Boolean) {
+                success = (Boolean) result;
+            } else if (result == null) {
+                // Some methods return void, assume success if no exception
+                success = true;
+            } else {
+                XposedBridge.log(TAG + ": ✗ Unexpected return type: " + result.getClass().getName());
+                broadcaster.warn("Observe Mode returned unexpected type: " + result.getClass().getName());
+                // Conservative: assume failure for unknown types
+                success = false;
+            }
             
             if (success) {
                 XposedBridge.log(TAG + ": ✓ Observe Mode DISABLED");

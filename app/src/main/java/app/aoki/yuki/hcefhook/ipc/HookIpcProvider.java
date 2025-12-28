@@ -163,6 +163,13 @@ public class HookIpcProvider extends ContentProvider {
                     return uri;
                 }
                 
+                // Handle command clear request (more efficient than full insert)
+                if ("pending_observe_mode_command".equals(key) && "".equals(value)) {
+                    Log.v(TAG, "insert() - Clearing pending command");
+                    configMap.remove(key);
+                    return uri;
+                }
+                
                 if (key != null && value != null) {
                     configMap.put(key, value);
                     Log.d(TAG, "insert() - Config set: " + key + " = " + value);
@@ -250,18 +257,6 @@ public class HookIpcProvider extends ContentProvider {
         if (injectionQueue.isEmpty()) return null;
         Long id = injectionQueue.keySet().iterator().next();
         return injectionQueue.remove(id);
-    }
-    
-    /**
-     * Get and clear pending Observe Mode command
-     * Called by hooks to check if there's a pending command
-     */
-    public static String getPendingObserveModeCommand() {
-        String command = configMap.get("pending_observe_mode_command");
-        if (command != null) {
-            configMap.remove("pending_observe_mode_command");
-        }
-        return command;
     }
     
     // Utility methods

@@ -3,4 +3,8 @@
     <color name="primary">#6200EE</color>
     <color name="primary_dark">#3700B3</color>
     <color name="accent">#03DAC5</color>
+    
+    <!-- Observe Mode button colors -->
+    <color name="observe_mode_enabled">#4CAF50</color>
+    <color name="observe_mode_disabled">#FF6B35</color>
 </resources>
