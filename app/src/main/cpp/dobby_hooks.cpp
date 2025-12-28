@@ -1,7 +1,7 @@
 /**
- * HCE-F Hook - Native Function Hooking (PLT Hook Implementation)
+ * HCE-F Hook - Native Function Hooking (DOBBY IMPLEMENTATION)
  * 
- * This module implements runtime native function hooks using PLT (Procedure Linkage Table) hooking.
+ * This module implements runtime native function hooks using Dobby library.
  * It targets libnfc-nci.so and libnfc_nci_jni.so functions that control NFC state
  * and data transmission, enabling SENSF_RES injection in Observe Mode.
  * 
@@ -15,7 +15,7 @@
  * 1. The NFC libraries are ALREADY loaded into memory
  * 2. We use RTLD_NOLOAD to get handles to already-loaded libraries
  * 3. We parse /proc/self/maps to find library base addresses
- * 4. We calculate function addresses from base + offset
+ * 4. We use Dobby's DobbyHook() API for professional inline hooking
  * 
  * This completely bypasses the namespace restriction because we're not loading anything new.
  */
@@ -31,6 +31,7 @@
 #include <stdint.h>
 #include <elf.h>
 #include <link.h>
+#include <dobby.h>  // Dobby hooking framework
 
 #define TAG "HcefHook.NativeHooks"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -138,60 +139,40 @@ static void* find_symbol_in_lib(void* handle, const char* symbol_name) {
 }
 
 /**
- * Memory protection manipulation for hooking
+ * Memory protection manipulation for hooking (NOT NEEDED WITH DOBBY)
+ * Dobby handles memory protection internally
  */
 static bool make_memory_writable(void* addr, size_t len) {
+    // Dobby handles this internally, but keep function for compatibility
     uintptr_t page_start = ((uintptr_t)addr) & ~(sysconf(_SC_PAGESIZE) - 1);
     return mprotect((void*)page_start, len + ((uintptr_t)addr - page_start), 
                     PROT_READ | PROT_WRITE | PROT_EXEC) == 0;
 }
 
 /**
- * Simple inline hook using trampoline (ARM64)
- * This patches the target function to jump to our hook
+ * Install hook using Dobby library
+ * This is MUCH more robust than manual ARM64 inline hooking!
  */
-static bool install_inline_hook_arm64(void* target, void* hook, void** original) {
+static bool install_dobby_hook(void* target, void* hook, void** original) {
     if (!target || !hook) {
         LOGE("Invalid hook parameters");
         return false;
     }
     
-    LOGI("Installing inline hook: target=%p, hook=%p", target, hook);
+    LOGI("Installing Dobby hook: target=%p, hook=%p", target, hook);
     
-    // Make target memory writable
-    if (!make_memory_writable(target, 16)) {
-        LOGE("Failed to make memory writable: %s", strerror(errno));
-        return false;
-    }
+    // Use Dobby's professional hooking API
+    // DobbyHook(target_address, fake_function, &original_function_pointer)
+    int result = DobbyHook(target, hook, original);
     
-    // For ARM64, we need to patch with a branch instruction
-    // This is a simplified implementation - full Dobby would handle edge cases
-    uint32_t* code = (uint32_t*)target;
-    
-    // Save original instructions for trampoline (simplified - just save pointer)
-    *original = target;
-    
-    // Calculate offset from target to hook
-    intptr_t offset = (intptr_t)hook - (intptr_t)target;
-    
-    // Check if we can use a simple branch (within ±128MB)
-    if (offset >= -0x8000000 && offset < 0x8000000) {
-        // ARM64 B instruction: 0x14000000 | ((offset >> 2) & 0x03FFFFFF)
-        uint32_t branch_insn = 0x14000000 | (((offset >> 2) & 0x03FFFFFF));
-        code[0] = branch_insn;
-        
-        LOGI("Installed direct branch hook");
+    if (result == 0) {
+        LOGI("✓✓✓ Successfully installed Dobby hook for %p", target);
+        LOGI("Original function saved at: %p", *original);
+        return true;
     } else {
-        // Need indirect jump via register
-        // This requires more complex instruction sequence
-        LOGW("Hook target too far, need indirect jump (not implemented)");
+        LOGE("✗ Dobby hook failed with code: %d", result);
         return false;
     }
-    
-    // Flush instruction cache
-    __builtin___clear_cache((char*)target, (char*)target + 16);
-    
-    return true;
 }
 
 /**
@@ -200,12 +181,26 @@ static bool install_inline_hook_arm64(void* target, void* hook, void** original)
  * We bypass it to always return true when we want to send SENSF_RES
  * 
  * This is a STATE CHECK function - we just bypass the check
+ * 
+ * With Dobby, we can now properly call the original function if needed!
  */
 static bool hook_nfa_dm_is_data_exchange_allowed(void) {
     LOGD("nfa_dm_is_data_exchange_allowed HOOKED - BYPASSING state check");
     
-    // ALWAYS allow data exchange, even in Observe Mode
-    // This bypasses the NFA state machine restrictions
+    // Option 1: ALWAYS allow data exchange (bypass mode)
+    if (bypass_enabled || spray_mode_enabled) {
+        LOGD("Bypass/Spray mode active: Forcing TRUE (allow data exchange)");
+        return true;
+    }
+    
+    // Option 2: Call original function when not in bypass mode
+    if (orig_nfa_dm_is_data_exchange_allowed) {
+        bool result = orig_nfa_dm_is_data_exchange_allowed();
+        LOGD("Original function returned: %d", result);
+        return result;
+    }
+    
+    // Fallback: Allow by default
     return true;
 }
 
@@ -236,12 +231,11 @@ static int hook_NFC_SendData(int conn_id, void* p_buf) {
 }
 
 /**
- * Resolve function pointers and install REAL hooks
+ * Resolve function pointers and install REAL hooks using Dobby
  * 
- * This implements actual inline hooking, not just state spoofing!
+ * This implements actual inline hooking using professional Dobby library!
  * 
- * IMPORTANT: We save the original function pointer BEFORE patching
- * to avoid infinite recursion.
+ * IMPORTANT: Dobby creates a proper trampoline, so we CAN call original functions
  */
 static bool resolve_and_hook_function(void* lib_handle, const char* symbol_name, 
                                      void* hook_func, void** orig_func) {
@@ -253,28 +247,24 @@ static bool resolve_and_hook_function(void* lib_handle, const char* symbol_name,
     
     LOGI("Resolved %s at %p", symbol_name, target);
     
-    // CRITICAL: Save the original function pointer FIRST before any patching
-    *orig_func = target;
-    
     // Install real hook if hook_func is provided
     if (hook_func) {
-        LOGI("Installing REAL inline hook for %s", symbol_name);
-        LOGW("NOTE: Current implementation doesn't create trampoline");
-        LOGW("Hooks will bypass original function - this is intentional for our use case");
+        LOGI("Installing Dobby hook for %s", symbol_name);
         
-        void* saved_original = nullptr;
-        if (install_inline_hook_arm64(target, hook_func, &saved_original)) {
-            LOGI("✓ Successfully installed hook for %s", symbol_name);
-            // Keep orig_func pointing to the original address (before patch)
-            // Our hook functions won't call it to avoid issues
+        if (install_dobby_hook(target, hook_func, orig_func)) {
+            LOGI("✓✓✓ Successfully installed Dobby hook for %s", symbol_name);
+            LOGI("✓ Original function trampoline at: %p", *orig_func);
+            LOGI("✓ Can safely call original function from hook!");
             return true;
         } else {
-            LOGE("✗ Failed to install hook for %s", symbol_name);
-            // orig_func is already saved, so we can still call it manually
+            LOGE("✗ Failed to install Dobby hook for %s", symbol_name);
+            // Save the target address anyway for manual calling
+            *orig_func = target;
             return false;
         }
     } else {
         // No hook function provided, just save the address
+        *orig_func = target;
         LOGI("Saved function pointer for %s (no hook installed)", symbol_name);
         return true;
     }
@@ -388,10 +378,12 @@ Java_app_aoki_yuki_hcefhook_nativehook_DobbyHooks_installHooks(JNIEnv *env, jcla
     // Use the same handle for both
     libnfc_handle = libnfc_jni_handle;
     
-    // Step 3: Resolve function pointers and install REAL hooks
-    LOGI("=== Step 3: Installing REAL Function Hooks ===");
+    // Step 3: Resolve function pointers and install REAL hooks using Dobby
+    LOGI("=== Step 3: Installing REAL Dobby Hooks ===");
+    LOGI("DOBBY VERSION: %s", DobbyGetVersion());
     LOGI("STRATEGY: Only hook STATE CHECK functions, not transmission functions");
     LOGI("This allows the real send functions to work once state checks are bypassed");
+    LOGI("WITH DOBBY: Proper trampolines allow calling original functions!");
     bool success = true;
     
     LOGI("=== Symbol Resolution and Selective Hooking ===");
@@ -466,9 +458,11 @@ Java_app_aoki_yuki_hcefhook_nativehook_DobbyHooks_installHooks(JNIEnv *env, jcla
     
     hooks_installed = true;
     LOGI("=== Native Hooks Installation Complete ===");
+    LOGI("✓✓✓ USING DOBBY LIBRARY v%s", DobbyGetVersion());
+    LOGI("✓✓✓ Professional inline hooking with trampolines");
+    LOGI("✓✓✓ Can safely call original functions from hooks");
     LOGI("Symbols resolved: %s", hooks_installed ? "YES" : "NO");
     LOGI("Ready for bypass/spray mode control");
-    LOGW("NOTE: Full inline hooking pending Dobby integration");
     
     return JNI_TRUE;
 }
@@ -543,6 +537,7 @@ Java_app_aoki_yuki_hcefhook_nativehook_DobbyHooks_getStatus(JNIEnv *env, jclass 
     char info[1024];
     snprintf(info, sizeof(info),
              "Native Hooks Status:\n"
+             "  Dobby Version: %s\n"
              "  Installed: %s\n"
              "  Bypass Enabled: %s\n"
              "  Spray Mode: %s\n"
@@ -552,7 +547,8 @@ Java_app_aoki_yuki_hcefhook_nativehook_DobbyHooks_getStatus(JNIEnv *env, jclass 
              "  nfa_dm_act_send_raw_frame: %p\n"
              "  NFC_SendData: %p\n"
              "  Process ID: %d\n"
-             "  Note: Inline hooking requires Dobby prebuilt library",
+             "  Hook Framework: Dobby (Professional)",
+             DobbyGetVersion(),
              hooks_installed ? "YES" : "NO",
              bypass_enabled ? "YES" : "NO",
              spray_mode_enabled ? "YES" : "NO",
