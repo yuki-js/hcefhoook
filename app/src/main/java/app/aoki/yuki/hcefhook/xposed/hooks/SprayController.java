@@ -3,11 +3,11 @@ package app.aoki.yuki.hcefhook.xposed.hooks;
 import android.os.Handler;
 import android.os.Looper;
 
-import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import de.robv.android.xposed.XposedBridge;
+import de.robv.android.xposed.XposedHelpers;
 
 import app.aoki.yuki.hcefhook.core.SensfResBuilder;
 import app.aoki.yuki.hcefhook.nativehook.DobbyHooks;
@@ -30,6 +30,7 @@ import app.aoki.yuki.hcefhook.nativehook.DobbyHooks;
  * rather than precise timing.
  * 
  * NOTE: This code runs in the com.android.nfc process context.
+ * Uses XposedHelpers for all method calls (no manual java.lang.reflect.Method)
  */
 public class SprayController {
     
@@ -51,15 +52,14 @@ public class SprayController {
     
     // Reference to NativeNfcManager for transmission
     private static Object nativeNfcManagerInstance = null;
-    private static Method transceiveMethod = null;
     
     /**
      * Set the NativeNfcManager instance for transmission
      * Should be called when SendRawFrameHook captures the instance
+     * Uses XposedHelpers.callMethod() instead of manual reflection
      */
-    public static void setNativeNfcManager(Object instance, Method method) {
+    public static void setNativeNfcManager(Object instance) {
         nativeNfcManagerInstance = instance;
-        transceiveMethod = method;
         XposedBridge.log(TAG + ": NativeNfcManager configured for spray mode");
     }
     
@@ -194,6 +194,7 @@ public class SprayController {
     
     /**
      * Perform a single transmission of the current SENSF_RES
+     * Uses XposedHelpers.callMethod() instead of manual reflection
      * 
      * @return true if transmission succeeded
      */
@@ -203,12 +204,13 @@ public class SprayController {
         }
         
         try {
-            if (nativeNfcManagerInstance != null && transceiveMethod != null) {
+            if (nativeNfcManagerInstance != null) {
                 int[] responseLen = new int[1];
                 
-                // Call native transceive method
-                byte[] response = (byte[]) transceiveMethod.invoke(
-                    nativeNfcManagerInstance, currentSensfRes, false, responseLen);
+                // Call doTransceive using XposedHelpers (no manual reflection)
+                byte[] response = (byte[]) XposedHelpers.callMethod(
+                    nativeNfcManagerInstance, "doTransceive",
+                    currentSensfRes, false, responseLen);
                 
                 int count = transmissionCount.get();
                 if (count % 3 == 0) {  // Log every 3rd transmission to avoid spam
@@ -249,10 +251,12 @@ public class SprayController {
         NfaStateHook.spoofListenActiveState();
         
         try {
-            if (nativeNfcManagerInstance != null && transceiveMethod != null) {
+            if (nativeNfcManagerInstance != null) {
                 int[] responseLen = new int[1];
-                byte[] response = (byte[]) transceiveMethod.invoke(
-                    nativeNfcManagerInstance, sensfRes, false, responseLen);
+                // Use XposedHelpers instead of manual reflection
+                byte[] response = (byte[]) XposedHelpers.callMethod(
+                    nativeNfcManagerInstance, "doTransceive",
+                    sensfRes, false, responseLen);
                 
                 boolean success = response != null;
                 XposedBridge.log(TAG + ": Injection " + (success ? "succeeded" : "failed"));

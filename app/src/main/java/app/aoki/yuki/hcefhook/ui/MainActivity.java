@@ -89,39 +89,10 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         
         // Initialize ObserveModeManager (no reflection, clean API)
         observeModeManager = new ObserveModeManager(this);
-        observeModeManager.setPollingFrameCallback(frames -> {
-            // Handle polling frames detected in Observe Mode
-            // frames is List<Object> where each Object is actually a PollingFrame instance
-            runOnUiThread(() -> {
-                appendLog("INFO", "=== Polling Frames Detected ===");
-                appendLog("INFO", "Frame count: " + frames.size());
-                
-                for (Object frameObj : frames) {
-                    try {
-                        // Use reflection-free approach via Xposed's method calling
-                        // The frameObj is a PollingFrame with getType() and getData() methods
-                        Class<?> frameClass = frameObj.getClass();
-                        java.lang.reflect.Method getTypeMethod = frameClass.getMethod("getType");
-                        java.lang.reflect.Method getDataMethod = frameClass.getMethod("getData");
-                        
-                        int type = (Integer) getTypeMethod.invoke(frameObj);
-                        byte[] data = (byte[]) getDataMethod.invoke(frameObj);
-                        
-                        String frameLog = String.format("Type: %d, Data: %s", 
-                            type, SensfResBuilder.toHexString(data));
-                        appendLog("DATA", frameLog);
-                        
-                        // Check if this is SENSF_REQ
-                        if (data != null && data.length >= 4 && data[1] == Constants.SENSF_REQ_CMD) {
-                            int systemCode = ((data[2] & 0xFF) << 8) | (data[3] & 0xFF);
-                            onSensfDetected(data, systemCode);
-                        }
-                    } catch (Exception e) {
-                        appendLog("ERROR", "Failed to parse PollingFrame: " + e.getMessage());
-                    }
-                }
-            });
-        });
+        
+        // Note: Polling frame data is delivered via IPC (LogBroadcaster)
+        // not via this callback, to avoid reflection in MainActivity
+        // The onSensfDetected() method handles the parsed data
         
         // Initialize views FIRST before any logging
         initViews();

@@ -2,7 +2,6 @@ package app.aoki.yuki.hcefhook.xposed.hooks;
 
 import android.content.Context;
 
-import java.lang.reflect.Method;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import de.robv.android.xposed.XC_MethodHook;
@@ -21,10 +20,11 @@ import app.aoki.yuki.hcefhook.xposed.LogBroadcaster;
  * to inject SENSF_RES frames in Observe Mode.
  * 
  * Key targets:
- * - NativeNfcManager.doTransceive() - Java JNI wrapper
+ * - NativeNfcManager.doTransceive() - Java JNI wrapper  
  * - Native: NFA_SendRawFrame() in libnfc-nci.so (requires Frida)
  * 
  * NOTE: This code runs in the com.android.nfc process context.
+ * Uses XposedHelpers for all method calls (no manual java.lang.reflect.Method)
  */
 public class SendRawFrameHook {
     
@@ -39,8 +39,6 @@ public class SendRawFrameHook {
     
     // Reference to native NFC manager for calling send methods
     private static Object nativeNfcManagerInstance = null;
-    private static Method sendRawFrameMethod = null;
-    private static Method transceiveMethod = null;
     
     /**
      * Set context obtained from hooked process
@@ -115,7 +113,7 @@ public class SendRawFrameHook {
                         // Store instance reference for later use
                         if (nativeNfcManagerInstance == null) {
                             nativeNfcManagerInstance = param.thisObject;
-                            cacheTransceiveMethod(nativeNfcClass);
+                            configureSprayController();
                         }
                         
                         byte[] data = (byte[]) param.args[0];
@@ -161,7 +159,7 @@ public class SendRawFrameHook {
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                         if (param.getResult() != null) {
                             nativeNfcManagerInstance = param.getResult();
-                            cacheTransceiveMethod(nativeNfcClass);
+                            configureSprayController();
                             broadcaster.debug("Captured NativeNfcManager instance");
                         }
                     }
@@ -173,27 +171,18 @@ public class SendRawFrameHook {
     }
     
     /**
-     * Cache the transceive method for later invocation
+     * Configure SprayController with NativeNfcManager reference
+     * Uses XposedHelpers instead of manual reflection
      */
-    private static void cacheTransceiveMethod(Class<?> nativeNfcClass) {
-        if (transceiveMethod != null) return;
+    private static void configureSprayController() {
+        if (nativeNfcManagerInstance == null) return;
         
-        try {
-            transceiveMethod = nativeNfcClass.getDeclaredMethod(
-                "doTransceive", byte[].class, boolean.class, int[].class);
-            transceiveMethod.setAccessible(true);
-            XposedBridge.log(TAG + ": Cached doTransceive method");
-            
-            // CRITICAL INTEGRATION: Configure SprayController with NativeNfcManager reference
-            if (nativeNfcManagerInstance != null) {
-                SprayController.setNativeNfcManager(nativeNfcManagerInstance, transceiveMethod);
-                XposedBridge.log(TAG + ": ✓ NativeNfcManager configured for SprayController");
-            } else {
-                XposedBridge.log(TAG + ": ✗ WARNING: nativeNfcManagerInstance is null, SprayController not configured");
-            }
-        } catch (NoSuchMethodException e) {
-            XposedBridge.log(TAG + ": Could not cache doTransceive: " + e.getMessage());
-        }
+        XposedBridge.log(TAG + ": Configuring SprayController");
+        
+        // CRITICAL INTEGRATION: Configure SprayController with NativeNfcManager reference
+        // SprayController will use XposedHelpers.callMethod() to invoke doTransceive
+        SprayController.setNativeNfcManager(nativeNfcManagerInstance);
+        XposedBridge.log(TAG + ": ✓ SprayController configured");
     }
     
     /**
@@ -274,12 +263,14 @@ public class SendRawFrameHook {
         NfaStateHook.spoofListenActiveState();
         
         try {
-            if (nativeNfcManagerInstance != null && transceiveMethod != null) {
-                XposedBridge.log(TAG + ": Attempting SENSF_RES injection via transceive");
+            if (nativeNfcManagerInstance != null) {
+                XposedBridge.log(TAG + ": Attempting SENSF_RES injection via doTransceive");
                 
                 int[] responseLen = new int[1];
-                byte[] response = (byte[]) transceiveMethod.invoke(
-                    nativeNfcManagerInstance, pendingInjection, false, responseLen);
+                // Use XposedHelpers instead of manual reflection
+                byte[] response = (byte[]) XposedHelpers.callMethod(
+                    nativeNfcManagerInstance, "doTransceive", 
+                    pendingInjection, false, responseLen);
                 
                 XposedBridge.log(TAG + ": Injection result: " + 
                     (response != null ? SensfResBuilder.toHexString(response) : "null"));

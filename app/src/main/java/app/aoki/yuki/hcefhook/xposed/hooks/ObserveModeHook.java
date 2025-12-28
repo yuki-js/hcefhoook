@@ -2,8 +2,6 @@ package app.aoki.yuki.hcefhook.xposed.hooks;
 
 import android.content.Context;
 
-import java.lang.reflect.Method;
-
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
@@ -21,7 +19,7 @@ import app.aoki.yuki.hcefhook.xposed.LogBroadcaster;
  * 
  * Implementation:
  * 1. Hook NfcService.onCreate to capture mDeviceHost (NativeNfcManager)
- * 2. Find setObserveMode() method via reflection
+ * 2. Call setObserveMode() using XposedHelpers (no manual reflection)
  * 3. Expose enableObserveMode()/disableObserveMode() for IPC control
  * 
  * NCI Command sent:
@@ -29,9 +27,11 @@ import app.aoki.yuki.hcefhook.xposed.LogBroadcaster;
  * - OID: 0x02 (NCI_ANDROID_PASSIVE_OBSERVE)
  * - Payload: 0x01 (enable) or 0x00 (disable)
  * 
- * Reference: AOSP packages/apps/Nfc/src/com/android/nfc/dhimpl/NativeNfcManager.cpp
+ * Reference: AOSP packages/apps/Nfc/src/com/android/nfc/NfcService.java
+ *   Line 2221: public synchronized boolean setObserveMode(boolean enable, String packageName)
  * 
  * NOTE: This code runs in the com.android.nfc process context.
+ * Uses XposedHelpers for all method calls (no manual java.lang.reflect.Method)
  */
 public class ObserveModeHook {
     
@@ -39,7 +39,6 @@ public class ObserveModeHook {
     
     // Captured references from NfcService
     private static Object nativeNfcManager = null;
-    private static Method setObserveModeMethod = null;
     
     // Context for logging
     private static LogBroadcaster broadcaster = null;
@@ -73,9 +72,6 @@ public class ObserveModeHook {
                             if (nativeNfcManager != null) {
                                 XposedBridge.log(TAG + ": ✓ Captured NativeNfcManager instance");
                                 broadcaster.info("NativeNfcManager captured for Observe Mode control");
-                                
-                                // Find setObserveMode method
-                                findObserveModeMethod();
                             } else {
                                 XposedBridge.log(TAG + ": ✗ mDeviceHost is null");
                                 broadcaster.warn("Failed to capture NativeNfcManager");
@@ -97,32 +93,6 @@ public class ObserveModeHook {
     }
     
     /**
-     * Find the setObserveMode method in NativeNfcManager
-     */
-    private static void findObserveModeMethod() {
-        if (nativeNfcManager == null) {
-            XposedBridge.log(TAG + ": Cannot find method - nativeNfcManager is null");
-            return;
-        }
-        
-        Class<?> nmClass = nativeNfcManager.getClass();
-        XposedBridge.log(TAG + ": Searching for setObserveMode in: " + nmClass.getName());
-        
-        // Use the exact method name from AOSP:
-        // From packages/apps/Nfc/nci/jni/NativeNfcManager.cpp:
-        // {"setObserveMode", "(Z)Z", (void*)nfcManager_setObserveMode}
-        try {
-            setObserveModeMethod = nmClass.getMethod("setObserveMode", boolean.class);
-            setObserveModeMethod.setAccessible(true);
-            XposedBridge.log(TAG + ": ✓ Found setObserveMode method");
-            broadcaster.info("Observe Mode method found: setObserveMode");
-        } catch (NoSuchMethodException e) {
-            XposedBridge.log(TAG + ": ✗ setObserveMode method not found");
-            broadcaster.error("setObserveMode method not found - Observe Mode not supported on this device");
-        }
-    }
-    
-    /**
      * Enable Observe Mode
      * 
      * @return true if successful, false otherwise
@@ -136,17 +106,12 @@ public class ObserveModeHook {
             return false;
         }
         
-        if (setObserveModeMethod == null) {
-            XposedBridge.log(TAG + ": ✗ Cannot enable - setObserveMode method not found");
-            broadcaster.error("Observe Mode enable failed: method not available");
-            return false;
-        }
-        
         try {
-            // Call setObserveMode(true)
-            Object result = setObserveModeMethod.invoke(nativeNfcManager, true);
+            // Call setObserveMode(true) using XposedHelpers (no manual reflection)
+            // This is the proper AOSP method from DeviceHost interface
+            Object result = XposedHelpers.callMethod(nativeNfcManager, "setObserveMode", true);
             
-            // Check result - be conservative with unknown return types
+            // Check result
             boolean success = false;
             if (result instanceof Boolean) {
                 success = (Boolean) result;
@@ -156,7 +121,6 @@ public class ObserveModeHook {
             } else {
                 XposedBridge.log(TAG + ": ✗ Unexpected return type: " + result.getClass().getName());
                 broadcaster.warn("Observe Mode returned unexpected type: " + result.getClass().getName());
-                // Conservative: assume failure for unknown types
                 success = false;
             }
             
@@ -194,27 +158,19 @@ public class ObserveModeHook {
             return false;
         }
         
-        if (setObserveModeMethod == null) {
-            XposedBridge.log(TAG + ": ✗ Cannot disable - setObserveMode method not found");
-            broadcaster.error("Observe Mode disable failed: method not available");
-            return false;
-        }
-        
         try {
-            // Call setObserveMode(false)
-            Object result = setObserveModeMethod.invoke(nativeNfcManager, false);
+            // Call setObserveMode(false) using XposedHelpers
+            Object result = XposedHelpers.callMethod(nativeNfcManager, "setObserveMode", false);
             
-            // Check result - be conservative with unknown return types
+            // Check result
             boolean success = false;
             if (result instanceof Boolean) {
                 success = (Boolean) result;
             } else if (result == null) {
-                // Some methods return void, assume success if no exception
                 success = true;
             } else {
                 XposedBridge.log(TAG + ": ✗ Unexpected return type: " + result.getClass().getName());
                 broadcaster.warn("Observe Mode returned unexpected type: " + result.getClass().getName());
-                // Conservative: assume failure for unknown types
                 success = false;
             }
             
@@ -240,9 +196,9 @@ public class ObserveModeHook {
     /**
      * Check if Observe Mode control is available
      * 
-     * @return true if the required method was found
+     * @return true if NativeNfcManager was captured
      */
     public static boolean isAvailable() {
-        return nativeNfcManager != null && setObserveModeMethod != null;
+        return nativeNfcManager != null;
     }
 }
