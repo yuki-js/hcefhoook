@@ -240,6 +240,7 @@ static void* resolve_symbol_in_module(const char* module_name, const char* symbo
     void* handle = dlopen(module_name, RTLD_NOW | RTLD_NOLOAD);
     if (handle) {
         void* addr = dlsym(handle, symbol_name);
+        dlclose(handle);  // Clean up handle (RTLD_NOLOAD doesn't increment refcount, but good practice)
         if (addr) {
             LOGI("[DobbySymbolResolver] dlsym found '%s' at %p", symbol_name, addr);
             return addr;

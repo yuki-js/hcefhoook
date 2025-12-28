@@ -191,14 +191,33 @@ This implementation:
 - Symbol stripped from library
 
 ### "State bypass not working"
-- Offset calculation may be device-specific
-- Check nfa_dm_cb hex dump for structure layout
+- **CRITICAL**: Offset calculation may be device-specific
+  - Current offset (0x28) is based on ST21NFC chipset analysis
+  - May differ on other NFC controllers or Android versions
+  - Check nfa_dm_cb hex dump in logs for structure layout
+  - Verify disc_state offset with AOSP sources for your Android version
 - Verify disc_state offset with AOSP sources
 
 ### "Hook installation failed"
 - Check Xposed/LSPosed is properly injecting
 - Verify library is actually loaded in process
 - Review full logcat output for errors
+
+### "Offset Mismatch Warning"
+If state bypass fails consistently:
+1. Check log output for nfa_dm_cb hex dump
+2. Compare with AOSP sources for your device:
+   ```cpp
+   // Expected structure (from nfa_dm_int.h):
+   typedef struct {
+       tNFC_DISCOVER_CBACK *p_disc_cback;
+       tNFA_DM_DISC_TECH_PROTO_MASK disc_mask;
+       uint8_t disc_state;  // <- TARGET OFFSET
+       // ...
+   } tNFA_DM_DISC_CB;
+   ```
+3. Adjust `DISC_CB_DISC_STATE_OFFSET` in dobby_hooks.cpp if needed
+4. Rebuild and test
 
 ## Future Enhancements
 
