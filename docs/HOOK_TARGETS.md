@@ -288,6 +288,8 @@ nm -C libnfc-nci.so | grep -E "nfa_dm|nci_snd|SendRaw"
 objdump -t libnfc-nci.so | grep -i "data_exchange"
 ```
 
+For STMicroelectronics ST21 builds, see [ST21NFC_SYMBOLS.md](ST21NFC_SYMBOLS.md) for exported symbol offsets from `ref_aosp/nfc_nci.st21nfc.st.so`, including `HalSendDownstream` used by the Dobby hook path.
+
 ### 3.2 Using Frida
 
 ```javascript

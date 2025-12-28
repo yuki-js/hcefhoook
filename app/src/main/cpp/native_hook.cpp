@@ -88,6 +88,33 @@ static void* find_symbol(const char* name) {
     return addr;
 }
 
+#ifdef USE_DOBBY
+extern "C" int DobbyHook(void* function_address, void* replace_call, void** orig_func);
+
+static int (*orig_hal_send_downstream)(void* ctx, const uint8_t* data, size_t len) = nullptr;
+
+static int hooked_hal_send_downstream(void* ctx, const uint8_t* data, size_t len) {
+    LOGI("[Dobby] HalSendDownstream len=%zu", len);
+    if (bypass_enabled) {
+        LOGI("[Dobby] bypass_enabled=true (pass-through)");
+    }
+    if (orig_hal_send_downstream) {
+        return orig_hal_send_downstream(ctx, data, len);
+    }
+    return -1;
+}
+
+static void install_dobby_hooks() {
+    void* hal_send = dlsym(libnfc_handle, "_Z17HalSendDownstreamPvPKhm");
+    if (hal_send && DobbyHook(hal_send, (void*)hooked_hal_send_downstream,
+                              (void**)&orig_hal_send_downstream) == 0) {
+        LOGI("Dobby hooked HalSendDownstream @ %p", hal_send);
+    } else {
+        LOGD("Dobby hook skipped (symbol or engine unavailable)");
+    }
+}
+#endif
+
 /**
  * Search for nfa_dm_cb global variable
  * This is a heuristic search based on code patterns
@@ -124,6 +151,10 @@ Java_app_aoki_yuki_hcefhook_native_NativeHook_init(JNIEnv *env, jclass clazz) {
     nfc_send_data_addr = find_symbol("NFC_SendData");
     nfa_dm_cb_ptr = find_nfa_dm_cb();
     
+#ifdef USE_DOBBY
+    install_dobby_hooks();
+#endif
+
     if (nfa_dm_cb_ptr) {
         LOGI("nfa_dm_cb found at %p", nfa_dm_cb_ptr);
     }
