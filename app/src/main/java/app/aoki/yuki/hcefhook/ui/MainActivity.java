@@ -29,7 +29,6 @@ import app.aoki.yuki.hcefhook.core.SensfResBuilder;
 import app.aoki.yuki.hcefhook.ipc.HookIpcProvider;
 import app.aoki.yuki.hcefhook.ipc.IpcClient;
 import app.aoki.yuki.hcefhook.observemode.ObserveModeManager;
-import app.aoki.yuki.hcefhook.xposed.hooks.SprayController;
 
 /**
  * Main activity for HCE-F Hook PoC
@@ -64,9 +63,9 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
     private CheckBox bypassCheck;
     private TextView statsText;
     
-    // Observe Mode controls
-    private Button observeModeToggleButton;
-    private CheckBox sprayModeCheck;
+    // Future UI control for Observe Mode (not yet implemented in layout)
+    // private Button observeModeToggleButton;
+    // private CheckBox sprayModeCheck;
     
     // IPC Client for communicating with hooks
     private IpcClient ipcClient;
@@ -143,16 +142,10 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
                                 .setPmm(pmm)
                                 .build();
                             
-                            // Check if spray mode is enabled
-                            if (sprayModeCheck != null && sprayModeCheck.isChecked()) {
-                                appendLog("INFO", "Spray mode enabled - using continuous transmission");
-                                // Note: Spray mode is triggered via hooks in android.nfc process
-                                // We queue the injection via IPC
-                                ipcClient.queueInjection(sensfRes);
-                            } else {
-                                appendLog("INFO", "Single-shot mode - queuing injection");
-                                ipcClient.queueInjection(sensfRes);
-                            }
+                            // Queue injection via IPC - hook will decide spray vs single-shot
+                            // based on DobbyHooks.isSprayModeEnabled()
+                            appendLog("INFO", "Queuing SENSF_RES injection");
+                            ipcClient.queueInjection(sensfRes);
                         } catch (Exception e) {
                             appendLog("ERROR", "Failed to prepare SENSF_RES: " + e.getMessage());
                         }
