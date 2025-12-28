@@ -84,16 +84,18 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         
-        appendLog("INFO", "MainActivity.onCreate() - Starting initialization");
-        
         // Initialize IPC client
         ipcClient = new IpcClient(this);
-        appendLog("DEBUG", "IPC client initialized");
         
+        // Initialize views FIRST before any logging
         initViews();
         setupLogReceiver();
         setupStatusUpdater();
         loadSavedConfig();
+        
+        // Now safe to log after views are initialized
+        appendLog("INFO", "MainActivity.onCreate() - Starting initialization");
+        appendLog("DEBUG", "IPC client initialized");
         
         // CRITICAL INTEGRATION: Initialize ObserveModeManager
         initializeObserveModeManager();
