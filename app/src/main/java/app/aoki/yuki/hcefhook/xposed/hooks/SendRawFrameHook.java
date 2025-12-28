@@ -58,7 +58,20 @@ public class SendRawFrameHook {
         XposedBridge.log(TAG + ": SENSF_RES queued for injection: " + 
             SensfResBuilder.toHexString(sensfRes));
         
-        // Attempt immediate injection if manager is available
+        // CRITICAL INTEGRATION: Use SprayController if spray mode is enabled
+        try {
+            if (app.aoki.yuki.hcefhook.nativehook.DobbyHooks.isSprayModeEnabled()) {
+                XposedBridge.log(TAG + ": ✓ Spray mode enabled - using SprayController");
+                SprayController.startSpray(sensfRes);
+                // Don't clear pending injection - spray controller handles it
+                return;
+            }
+        } catch (Exception e) {
+            XposedBridge.log(TAG + ": Could not check spray mode: " + e.getMessage());
+        }
+        
+        // LEGACY: Fall back to single-shot injection
+        XposedBridge.log(TAG + ": Using single-shot injection");
         attemptInjection();
     }
     
@@ -170,6 +183,14 @@ public class SendRawFrameHook {
                 "doTransceive", byte[].class, boolean.class, int[].class);
             transceiveMethod.setAccessible(true);
             XposedBridge.log(TAG + ": Cached doTransceive method");
+            
+            // CRITICAL INTEGRATION: Configure SprayController with NativeNfcManager reference
+            if (nativeNfcManagerInstance != null) {
+                SprayController.setNativeNfcManager(nativeNfcManagerInstance, transceiveMethod);
+                XposedBridge.log(TAG + ": ✓ NativeNfcManager configured for SprayController");
+            } else {
+                XposedBridge.log(TAG + ": ✗ WARNING: nativeNfcManagerInstance is null, SprayController not configured");
+            }
         } catch (NoSuchMethodException e) {
             XposedBridge.log(TAG + ": Could not cache doTransceive: " + e.getMessage());
         }

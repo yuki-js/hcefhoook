@@ -1,0 +1,7 @@
+id=hcefhook
+name=HCE-F Hook - Observe Mode NFC Module
+version=1.0.0
+versionCode=1
+author=yuki-js
+description=Enables Host-based SENSF_RES injection in Android NFC Observe Mode. Overlays NFC configuration files and provides root access for native hooks. Requires KernelSU and Xposed (LSPosed) framework.
+updateJson=https://raw.githubusercontent.com/yuki-js/hcefhoook/main/kernelsu_module/update.json
