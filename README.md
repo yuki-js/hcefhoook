@@ -58,21 +58,23 @@ hcefhoook/
 
 ```
 [MainActivity (app process)]
-    ↓ IPC (ContentProvider)
-    ↓ initialize() / callback registration
+    ↓ initialize ObserveModeManager
 [ObserveModeManager]
     ↓ enable Observe Mode
 [NFCC in Observe Mode]
     ↓ NCI_ANDROID_POLLING_FRAME_NTF
 [PollingFrameHook (android.nfc process)]
-    ↓ onPollingFrameReceived()
-[ObserveModeManager.onPollingFrameReceived()]
     ↓ detect SENSF_REQ (SC=FFFF)
-    ↓ trigger callback
-[SENSF_REQ Callback]
-    ↓ queue injection via IPC
-[SendRawFrameHook / SprayController]
-    ↓ inject SENSF_RES (single-shot or spray mode)
+    ↓ IPC (Broadcast: ACTION_SENSF_DETECTED)
+[LogReceiver (app process)]
+    ↓ onReceive()
+[MainActivity.onSensfDetected()]
+    ↓ auto-inject enabled?
+    ↓ queue injection via IPC (ContentProvider)
+[SendRawFrameHook (android.nfc process)]
+    ↓ inject SENSF_RES (spray mode or single-shot)
+[SprayController]
+    ↓ continuous transmission (2ms interval)
 [NativeNfcManager.doTransceive()]
     ↓ send to NFCC
 [リーダー受信成功 (probabilistic)]
