@@ -74,8 +74,11 @@ extern "C" void *DobbySymbolResolver(const char *image_name, const char *symbol_
         handle = dlopen(image_name, RTLD_NOW | RTLD_NOLOAD);
         if (!handle) {
             LOGW("DobbySymbolResolver stub: %s not preloaded, trying RTLD_NOW", image_name);
-            handle = dlopen(image_name, RTLD_NOW);
-            handle_from_load = handle != nullptr;
+            void *loaded = dlopen(image_name, RTLD_NOW);
+            if (loaded) {
+                handle = loaded;
+                handle_from_load = true;
+            }
         }
         if (!handle) {
             LOGW("DobbySymbolResolver stub: dlopen(%s) failed: %s", image_name, dlerror());
@@ -91,7 +94,9 @@ extern "C" void *DobbySymbolResolver(const char *image_name, const char *symbol_
     }
 
     if (handle_from_load && handle && handle != RTLD_DEFAULT && handle != RTLD_NEXT) {
-        dlclose(handle);
+        if (dlclose(handle) != 0) {
+            LOGW("DobbySymbolResolver stub: dlclose failed: %s", dlerror());
+        }
     }
     return symbol;
 }

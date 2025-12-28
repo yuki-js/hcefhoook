@@ -245,7 +245,7 @@ static bool resolve_and_hook_function(void* lib_handle, const char* symbol_name,
     void* target = nullptr;
 
     // Prefer Dobby's built-in symbol resolver when available
-    if (primary_lib_initialized && primary_lib_path[0] != '\0') {
+    if (primary_lib_initialized) {
         target = DobbySymbolResolver(primary_lib_path, symbol_name);
         if (target) {
             LOGI("DobbySymbolResolver resolved %s at %p", symbol_name, target);
@@ -370,8 +370,15 @@ Java_app_aoki_yuki_hcefhook_nativehook_DobbyHooks_installHooks(JNIEnv *env, jcla
     
     const char* primary_lib = found_jni_lib ? nfc_jni_lib_path : nfc_lib_path;
     LOGI("Primary library: %s", primary_lib);
-    snprintf(primary_lib_path, sizeof(primary_lib_path), "%s", primary_lib);
-    primary_lib_initialized = primary_lib_path[0] != '\0';
+    size_t lib_len = strlen(primary_lib);
+    if (lib_len >= sizeof(primary_lib_path)) {
+        LOGE("Primary library path too long (%zu bytes), cannot use DobbySymbolResolver safely", lib_len);
+        primary_lib_initialized = false;
+        primary_lib_path[0] = '\0';
+    } else {
+        snprintf(primary_lib_path, sizeof(primary_lib_path), "%s", primary_lib);
+        primary_lib_initialized = true;
+    }
     
     // Try RTLD_NOLOAD - this gets a handle to already-loaded library
     libnfc_jni_handle = dlopen(primary_lib, RTLD_NOW | RTLD_NOLOAD);
