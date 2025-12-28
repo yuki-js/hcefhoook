@@ -1,6 +1,8 @@
 package app.aoki.yuki.hcefhook.xposed.hooks;
 
 import android.content.Context;
+import android.nfc.NfcAdapter;
+import android.nfc.cardemulation.CardEmulation;
 
 import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
@@ -10,81 +12,97 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam;
 import app.aoki.yuki.hcefhook.xposed.LogBroadcaster;
 
 /**
- * Hook for controlling NFC Observe Mode
+ * Hook for NFC Observe Mode - Complete Rewrite
  * 
- * Observe Mode is a vendor-specific NCI command that allows the host to passively
- * observe polling frames from readers without the eSE (Secure Element) responding.
- * This is critical for SENSF_RES injection as it prevents the eSE from sending
- * its own response with a fixed IDm.
+ * WHAT WE'RE TRYING TO DO:
+ * ========================
+ * We want to enable Android's Observe Mode to passively receive polling frames
+ * (especially SENSF_REQ with SC=FFFF) without the eSE auto-responding.
  * 
- * Implementation:
- * 1. Hook NfcService.onCreate to capture mDeviceHost (NativeNfcManager)
- * 2. Call setObserveMode() using XposedHelpers (no manual reflection)
- * 3. Expose enableObserveMode()/disableObserveMode() for IPC control
+ * THE RIGHT WAY:
+ * ==============
+ * Use the official NfcAdapter API introduced in Android 15:
+ * - NfcAdapter.isObserveModeSupported() - Check if device supports it
+ * - NfcAdapter.isObserveModeEnabled() - Check current state
+ * - NfcAdapter.setObserveMode(boolean enable, String packageName) - Enable/disable
  * 
- * NCI Command sent:
- * - GID: 0x0F (Proprietary/Android)
- * - OID: 0x02 (NCI_ANDROID_PASSIVE_OBSERVE)
- * - Payload: 0x01 (enable) or 0x00 (disable)
+ * We should NOT be hooking internal NfcService methods directly.
+ * Instead, we provide a clean interface for the MainActivity to use the official API.
  * 
- * Reference: AOSP packages/apps/Nfc/src/com/android/nfc/NfcService.java
- *   Line 2221: public synchronized boolean setObserveMode(boolean enable, String packageName)
+ * REFERENCE:
+ * ==========
+ * AOSP packages/apps/Nfc/src/com/android/nfc/NfcService.java
+ * - Line 2221: public synchronized boolean setObserveMode(boolean enable, String packageName)
+ * - Line 2195: public boolean isObserveModeSupported()
+ * - Line 2209: public synchronized boolean isObserveModeEnabled()
  * 
  * NOTE: This code runs in the com.android.nfc process context.
- * Uses XposedHelpers for all method calls (no manual java.lang.reflect.Method)
  */
 public class ObserveModeHook {
     
     private static final String TAG = "HcefHook.ObserveMode";
     
-    // Captured references from NfcService
-    private static Object nativeNfcManager = null;
+    // Reference to NfcAdapter for API access
+    private static NfcAdapter nfcAdapter = null;
     
     // Context for logging
     private static LogBroadcaster broadcaster = null;
     
+    // Context from android.nfc process
+    private static Context nfcContext = null;
+    
     /**
      * Install Observe Mode hooks
+     * 
+     * This is minimal - we just capture the NFC context and adapter.
+     * The actual ObserveMode control happens via official NfcAdapter API.
      */
     public static void install(LoadPackageParam lpparam, LogBroadcaster logBroadcaster) {
         broadcaster = logBroadcaster;
         
         try {
-            Class<?> nfcServiceClass = XposedHelpers.findClass(
-                "com.android.nfc.NfcService", lpparam.classLoader);
-            
-            // Hook NfcService.onCreate to capture mDeviceHost
+            // Hook Application.attach to get NFC service context
             XposedHelpers.findAndHookMethod(
-                nfcServiceClass,
-                "onCreate",
+                "android.app.Application",
+                lpparam.classLoader,
+                "attach",
+                Context.class,
                 new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        XposedBridge.log(TAG + ": NfcService.onCreate() called");
+                        nfcContext = (Context) param.args[0];
+                        XposedBridge.log(TAG + ": Captured NFC context");
                         
-                        // Get NfcService instance
-                        Object nfcService = param.thisObject;
-                        
-                        // Capture mDeviceHost (NativeNfcManager instance)
+                        // Get NfcAdapter using official API
                         try {
-                            nativeNfcManager = XposedHelpers.getObjectField(nfcService, "mDeviceHost");
-                            
-                            if (nativeNfcManager != null) {
-                                XposedBridge.log(TAG + ": ✓ Captured NativeNfcManager instance");
-                                broadcaster.info("NativeNfcManager captured for Observe Mode control");
+                            nfcAdapter = NfcAdapter.getDefaultAdapter(nfcContext);
+                            if (nfcAdapter != null) {
+                                XposedBridge.log(TAG + ": ✓ Got NfcAdapter instance");
+                                broadcaster.info("NfcAdapter ready for Observe Mode control");
+                                
+                                // Check Observe Mode support
+                                try {
+                                    boolean supported = (boolean) XposedHelpers.callMethod(
+                                        nfcAdapter, "isObserveModeSupported");
+                                    XposedBridge.log(TAG + ": Observe Mode supported: " + supported);
+                                    broadcaster.info("Observe Mode supported: " + supported);
+                                } catch (Exception e) {
+                                    XposedBridge.log(TAG + ": isObserveModeSupported() not available: " + e.getMessage());
+                                    broadcaster.warn("Observe Mode API may not be available on this device");
+                                }
                             } else {
-                                XposedBridge.log(TAG + ": ✗ mDeviceHost is null");
-                                broadcaster.warn("Failed to capture NativeNfcManager");
+                                XposedBridge.log(TAG + ": ✗ NfcAdapter is null");
+                                broadcaster.warn("Failed to get NfcAdapter");
                             }
                         } catch (Exception e) {
-                            XposedBridge.log(TAG + ": Failed to get mDeviceHost: " + e.getMessage());
-                            broadcaster.error("mDeviceHost capture failed: " + e.getMessage());
+                            XposedBridge.log(TAG + ": Failed to get NfcAdapter: " + e.getMessage());
+                            broadcaster.error("NfcAdapter initialization failed: " + e.getMessage());
                         }
                     }
                 }
             );
             
-            broadcaster.info("ObserveModeHook installed");
+            broadcaster.info("ObserveModeHook installed (minimal - using official API)");
             
         } catch (Throwable t) {
             XposedBridge.log(TAG + ": Failed to install hook: " + t.getMessage());
@@ -93,48 +111,43 @@ public class ObserveModeHook {
     }
     
     /**
-     * Enable Observe Mode
+     * Enable Observe Mode using official NfcAdapter API
+     * 
+     * Uses: NfcAdapter.setObserveModeEnabled(true)
      * 
      * @return true if successful, false otherwise
      */
     public static boolean enableObserveMode() {
         XposedBridge.log(TAG + ": enableObserveMode() called");
         
-        if (nativeNfcManager == null) {
-            XposedBridge.log(TAG + ": ✗ Cannot enable - NativeNfcManager not captured");
-            broadcaster.error("Observe Mode enable failed: NativeNfcManager not ready");
+        if (nfcAdapter == null) {
+            XposedBridge.log(TAG + ": ✗ Cannot enable - NfcAdapter not available");
+            broadcaster.error("Observe Mode enable failed: NfcAdapter not ready");
             return false;
         }
         
         try {
-            // Call setObserveMode(true) using XposedHelpers (no manual reflection)
-            // This is the proper AOSP method from DeviceHost interface
-            Object result = XposedHelpers.callMethod(nativeNfcManager, "setObserveMode", true);
+            // Call official NfcAdapter.setObserveModeEnabled(true) API
+            // This is the correct public API method!
+            XposedHelpers.callMethod(nfcAdapter, "setObserveModeEnabled", true);
             
-            // Check result
-            boolean success = false;
-            if (result instanceof Boolean) {
-                success = (Boolean) result;
-            } else if (result == null) {
-                // Some methods return void, assume success if no exception
-                success = true;
-            } else {
-                XposedBridge.log(TAG + ": ✗ Unexpected return type: " + result.getClass().getName());
-                broadcaster.warn("Observe Mode returned unexpected type: " + result.getClass().getName());
-                success = false;
+            XposedBridge.log(TAG + ": ✓✓✓ Observe Mode ENABLED via setObserveModeEnabled() ✓✓✓");
+            broadcaster.info("*** Observe Mode ENABLED (NfcAdapter.setObserveModeEnabled) ***");
+            broadcaster.info("NFCC is now in passive observation mode");
+            broadcaster.info("eSE will not respond to SENSF_REQ");
+            
+            // Verify the state
+            try {
+                boolean enabled = (boolean) XposedHelpers.callMethod(
+                    nfcAdapter, "isObserveModeEnabled");
+                XposedBridge.log(TAG + ": Verified state - isObserveModeEnabled: " + enabled);
+                broadcaster.info("Verified: isObserveModeEnabled() = " + enabled);
+                return enabled;
+            } catch (Exception e) {
+                XposedBridge.log(TAG + ": Could not verify state: " + e.getMessage());
+                // Assume success if setObserveModeEnabled didn't throw
+                return true;
             }
-            
-            if (success) {
-                XposedBridge.log(TAG + ": ✓✓✓ Observe Mode ENABLED ✓✓✓");
-                broadcaster.info("*** Observe Mode ENABLED ***");
-                broadcaster.info("NFCC is now in passive observation mode");
-                broadcaster.info("eSE will not respond to SENSF_REQ");
-            } else {
-                XposedBridge.log(TAG + ": ✗ Observe Mode enable failed (method returned false)");
-                broadcaster.error("Observe Mode enable failed");
-            }
-            
-            return success;
             
         } catch (Exception e) {
             XposedBridge.log(TAG + ": ✗ Exception enabling Observe Mode: " + e.getMessage());
@@ -145,45 +158,40 @@ public class ObserveModeHook {
     }
     
     /**
-     * Disable Observe Mode
+     * Disable Observe Mode using official NfcAdapter API
+     * 
+     * Uses: NfcAdapter.setObserveModeEnabled(false)
      * 
      * @return true if successful, false otherwise
      */
     public static boolean disableObserveMode() {
         XposedBridge.log(TAG + ": disableObserveMode() called");
         
-        if (nativeNfcManager == null) {
-            XposedBridge.log(TAG + ": ✗ Cannot disable - NativeNfcManager not captured");
-            broadcaster.error("Observe Mode disable failed: NativeNfcManager not ready");
+        if (nfcAdapter == null) {
+            XposedBridge.log(TAG + ": ✗ Cannot disable - NfcAdapter not available");
+            broadcaster.error("Observe Mode disable failed: NfcAdapter not ready");
             return false;
         }
         
         try {
-            // Call setObserveMode(false) using XposedHelpers
-            Object result = XposedHelpers.callMethod(nativeNfcManager, "setObserveMode", false);
+            // Call official NfcAdapter.setObserveModeEnabled(false) API
+            XposedHelpers.callMethod(nfcAdapter, "setObserveModeEnabled", false);
             
-            // Check result
-            boolean success = false;
-            if (result instanceof Boolean) {
-                success = (Boolean) result;
-            } else if (result == null) {
-                success = true;
-            } else {
-                XposedBridge.log(TAG + ": ✗ Unexpected return type: " + result.getClass().getName());
-                broadcaster.warn("Observe Mode returned unexpected type: " + result.getClass().getName());
-                success = false;
+            XposedBridge.log(TAG + ": ✓ Observe Mode DISABLED via setObserveModeEnabled()");
+            broadcaster.info("Observe Mode DISABLED (NfcAdapter.setObserveModeEnabled)");
+            broadcaster.info("NFCC returned to normal mode");
+            
+            // Verify the state
+            try {
+                boolean enabled = (boolean) XposedHelpers.callMethod(
+                    nfcAdapter, "isObserveModeEnabled");
+                XposedBridge.log(TAG + ": Verified state - isObserveModeEnabled: " + enabled);
+                broadcaster.info("Verified: isObserveModeEnabled() = " + enabled);
+                return !enabled;
+            } catch (Exception e) {
+                XposedBridge.log(TAG + ": Could not verify state: " + e.getMessage());
+                return true;
             }
-            
-            if (success) {
-                XposedBridge.log(TAG + ": ✓ Observe Mode DISABLED");
-                broadcaster.info("Observe Mode DISABLED");
-                broadcaster.info("NFCC returned to normal mode");
-            } else {
-                XposedBridge.log(TAG + ": ✗ Observe Mode disable failed (method returned false)");
-                broadcaster.error("Observe Mode disable failed");
-            }
-            
-            return success;
             
         } catch (Exception e) {
             XposedBridge.log(TAG + ": ✗ Exception disabling Observe Mode: " + e.getMessage());
@@ -196,9 +204,27 @@ public class ObserveModeHook {
     /**
      * Check if Observe Mode control is available
      * 
-     * @return true if NativeNfcManager was captured
+     * @return true if NfcAdapter is available
      */
     public static boolean isAvailable() {
-        return nativeNfcManager != null;
+        return nfcAdapter != null && nfcContext != null;
+    }
+    
+    /**
+     * Check if Observe Mode is currently enabled
+     * 
+     * @return true if enabled, false otherwise
+     */
+    public static boolean isEnabled() {
+        if (nfcAdapter == null) {
+            return false;
+        }
+        
+        try {
+            return (boolean) XposedHelpers.callMethod(nfcAdapter, "isObserveModeEnabled");
+        } catch (Exception e) {
+            XposedBridge.log(TAG + ": Failed to check Observe Mode state: " + e.getMessage());
+            return false;
+        }
     }
 }

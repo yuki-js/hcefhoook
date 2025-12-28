@@ -120,8 +120,16 @@ public class PollingFrameHook {
                                 int type = (typeObj instanceof Integer) ? (Integer) typeObj : 0;
                                 byte[] data = (dataObj instanceof byte[]) ? (byte[]) dataObj : new byte[0];
                                 
-                                broadcaster.debug("PollingFrame: type=" + type + ", data=" + 
-                                    SensfResBuilder.toHexString(data));
+                                // Log raw frame data prominently
+                                String hexData = SensfResBuilder.toHexString(data);
+                                broadcaster.info("=== RAW POLLING FRAME ===");
+                                broadcaster.info("Type: " + type);
+                                broadcaster.info("Data: " + hexData);
+                                broadcaster.info("Length: " + data.length + " bytes");
+                                broadcaster.debug("PollingFrame object: " + frameObj.getClass().getName());
+                                
+                                // Also log to Xposed bridge for debugging
+                                XposedBridge.log(TAG + ": RAW FRAME - Type=" + type + " Data=" + hexData);
                                 
                                 // Process the frame data to detect SENSF_REQ
                                 processPollingFrame(data, broadcaster);

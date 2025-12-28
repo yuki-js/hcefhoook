@@ -174,37 +174,91 @@ Java_app_aoki_yuki_hcefhook_nativehook_DobbyHooks_installHooks(JNIEnv *env, jcla
     LOGI("NOTE: Full inline hooking requires Dobby prebuilt library");
     LOGI("Current implementation: Symbol resolution + state management");
     
-    // Based on Frida detection, the correct library is libstnfc_nci_jni.so
-    // This is the ST Microelectronics NFC JNI implementation
-    libnfc_jni_handle = dlopen("libstnfc_nci_jni.so", RTLD_NOW | RTLD_GLOBAL);
+    // Strategy: Enumerate all loaded modules and find NFC library dynamically
+    // This is more robust than hardcoding library names
+    LOGI("=== Enumerating loaded modules to find NFC library ===");
+    
+    FILE* maps = fopen("/proc/self/maps", "r");
+    if (!maps) {
+        LOGE("Failed to open /proc/self/maps");
+        return JNI_FALSE;
+    }
+    
+    char line[512];
+    char nfc_lib_name[256] = {0};
+    bool found_nfc_lib = false;
+    
+    while (fgets(line, sizeof(line), maps)) {
+        // Look for shared libraries (.so) with "nfc" in the name
+        if (strstr(line, ".so") && strstr(line, "nfc")) {
+            // Extract library name from the maps line
+            char* lib_path = strrchr(line, '/');
+            if (lib_path) {
+                lib_path++; // Skip the '/'
+                // Copy library name (up to newline or space)
+                int i = 0;
+                while (lib_path[i] && lib_path[i] != '\n' && lib_path[i] != ' ' && i < 255) {
+                    nfc_lib_name[i] = lib_path[i];
+                    i++;
+                }
+                nfc_lib_name[i] = '\0';
+                
+                // Prefer JNI library if found
+                if (strstr(nfc_lib_name, "jni")) {
+                    found_nfc_lib = true;
+                    break;
+                }
+                // Otherwise, keep the first NFC library found
+                if (!found_nfc_lib) {
+                    found_nfc_lib = true;
+                }
+            }
+        }
+    }
+    fclose(maps);
+    
+    if (!found_nfc_lib || strlen(nfc_lib_name) == 0) {
+        LOGE("✗ No NFC library found in loaded modules");
+        LOGE("Please ensure NFC service is running");
+        return JNI_FALSE;
+    }
+    
+    LOGI("✓ Found NFC library: %s", nfc_lib_name);
+    
+    // Try to open the detected library
+    libnfc_jni_handle = dlopen(nfc_lib_name, RTLD_NOW | RTLD_GLOBAL);
     if (!libnfc_jni_handle) {
-        LOGE("Failed to open libstnfc_nci_jni.so: %s", dlerror());
-        LOGI("Attempting fallback to generic library names...");
+        LOGE("Failed to open %s: %s", nfc_lib_name, dlerror());
         
-        // Fallback attempts for different device vendors
-        libnfc_jni_handle = dlopen("libnfc_nci_jni.so", RTLD_NOW | RTLD_GLOBAL);
+        // Fallback: Try well-known names
+        LOGI("Attempting fallback to well-known library names...");
+        const char* fallback_libs[] = {
+            "libstnfc_nci_jni.so",
+            "libnfc_nci_jni.so",
+            "libnfc-nci.so",
+            "libnfc_nci.so",
+            NULL
+        };
+        
+        for (int i = 0; fallback_libs[i] != NULL; i++) {
+            libnfc_jni_handle = dlopen(fallback_libs[i], RTLD_NOW | RTLD_GLOBAL);
+            if (libnfc_jni_handle) {
+                LOGI("✓ Loaded fallback library: %s", fallback_libs[i]);
+                snprintf(nfc_lib_name, sizeof(nfc_lib_name), "%s", fallback_libs[i]);
+                break;
+            }
+        }
+        
         if (!libnfc_jni_handle) {
-            LOGE("Failed to open libnfc_nci_jni.so: %s", dlerror());
+            LOGE("✗ All library loading attempts failed");
             return JNI_FALSE;
         }
     }
-    LOGI("✓ Loaded NFC JNI library: %p", libnfc_jni_handle);
     
-    // Try to load the underlying NCI library (may be separate or bundled)
-    libnfc_handle = dlopen("libnfc-nci.so", RTLD_NOW | RTLD_GLOBAL);
-    if (!libnfc_handle) {
-        // Try ST-specific library name
-        libnfc_handle = dlopen("nfc_nci.st21nfc.st.so", RTLD_NOW | RTLD_GLOBAL);
-        if (!libnfc_handle) {
-            LOGW("NCI library not separately available (may be bundled in JNI): %s", dlerror());
-            // Use JNI handle as fallback - symbols may be in the same library
-            libnfc_handle = libnfc_jni_handle;
-        } else {
-            LOGI("✓ Loaded ST NCI library: %p", libnfc_handle);
-        }
-    } else {
-        LOGI("✓ Loaded NCI library: %p", libnfc_handle);
-    }
+    LOGI("✓ Successfully loaded NFC library: %s at %p", nfc_lib_name, libnfc_jni_handle);
+    
+    // Use the same handle for both (they may be the same library)
+    libnfc_handle = libnfc_jni_handle;
     
     // Resolve function pointers (and hook if safe)
     bool success = true;
