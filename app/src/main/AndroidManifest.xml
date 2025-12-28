@@ -30,8 +30,37 @@
             <intent-filter>
                 <action android:name="app.aoki.yuki.hcefhook.LOG_ENTRY" />
                 <action android:name="app.aoki.yuki.hcefhook.SENSF_DETECTED" />
+                <action android:name="app.aoki.yuki.hcefhook.POLLING_FRAME" />
             </intent-filter>
         </receiver>
+        
+        <!--
+            HCE-F Observe Mode Service
+            
+            This is the CORRECT way to implement Observe Mode in Android 15+.
+            
+            HOW IT WORKS:
+            - Service extends HostNfcFService
+            - Declares polling-loop-filter in XML meta-data
+            - System automatically enables Observe Mode when service is foreground
+            - onPollingLoopDetected() receives polling frames (including SENSF_REQ SC=FFFF)
+            - eSE is silenced - no automatic response
+            
+            NO XPOSED HOOKS NEEDED FOR OBSERVE MODE!
+            
+            Reference: android-observe-mode-demo, Android 15 HCE documentation
+        -->
+        <service
+            android:name=".nfc.HcefObserveModeService"
+            android:exported="true"
+            android:permission="android.permission.BIND_NFC_SERVICE">
+            <intent-filter>
+                <action android:name="android.nfc.cardemulation.action.HOST_NFCF_SERVICE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.nfc.cardemulation.host_nfcf_service"
+                android:resource="@xml/hcef_observe_mode_service" />
+        </service>
         
         <!-- IPC Provider for cross-process communication with hooks -->
         <provider

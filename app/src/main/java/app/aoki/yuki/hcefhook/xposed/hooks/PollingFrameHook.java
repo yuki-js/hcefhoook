@@ -55,35 +55,31 @@ public class PollingFrameHook {
      * Install polling frame hooks
      */
     public static void install(LoadPackageParam lpparam, LogBroadcaster broadcaster) {
-        // Try to hook NfcService.onPollingLoopDetected or similar
-        // The exact method name may vary by Android version
-        
+        // Hook NfcService.onPollingLoopDetected (the correct AOSP callback)
+        // This is called when the NFCC sends polling frames in Observe Mode
         try {
-            // Hook NfcService polling loop handler (Android 15+)
             hookPollingLoopHandler(lpparam, broadcaster);
         } catch (Throwable t) {
             XposedBridge.log(TAG + ": Failed to hook polling loop: " + t.getMessage());
-            broadcaster.warn("Polling loop hook failed: " + t.getMessage());
-        }
-        
-        try {
-            // Hook NfcDispatcher for lower-level access
-            hookNfcDispatcher(lpparam, broadcaster);
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + ": Failed to hook NfcDispatcher: " + t.getMessage());
-        }
-        
-        // Try to hook native layer notification handling
-        try {
-            hookNativeNotification(lpparam, broadcaster);
-        } catch (Throwable t) {
-            XposedBridge.log(TAG + ": Native notification hook unavailable: " + t.getMessage());
+            broadcaster.error("Polling loop hook failed: " + t.getMessage());
         }
     }
     
     /**
      * Hook NfcService.onPollingLoopDetected
-     * This is called when a polling frame is received in Observe Mode
+     * 
+     * This is called when a polling frame is received in Observe Mode.
+     * According to AOSP packages/apps/Nfc/src/com/android/nfc/NfcService.java:
+     * 
+     *   @Override
+     *   public void onPollingLoopDetected(List<PollingFrame> frames) {
+     *       if (mCardEmulationManager != null && android.nfc.Flags.nfcReadPollingLoop()) {
+     *           mCardEmulationManager.onPollingLoopDetected(frames);
+     *       }
+     *   }
+     * 
+     * This method is part of the DeviceHost.DeviceHostListener interface.
+     * The signature is: void onPollingLoopDetected(List<PollingFrame> frames)
      */
     private static void hookPollingLoopHandler(LoadPackageParam lpparam, LogBroadcaster broadcaster) {
         Class<?> nfcServiceClass = XposedHelpers.findClassIfExists(
@@ -94,104 +90,61 @@ public class PollingFrameHook {
             return;
         }
         
-        // Try different method names for polling loop detection
-        String[] methodNames = {
-            "onPollingLoopDetected",
-            "handlePollingFrame",
-            "processPollingFrame",
-            "onObserveModePollingFrame"
-        };
-        
-        for (String methodName : methodNames) {
-            try {
-                XposedHelpers.findAndHookMethod(
-                    nfcServiceClass,
-                    methodName,
-                    byte[].class,
-                    new XC_MethodHook() {
-                        @Override
-                        protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                            byte[] frameData = (byte[]) param.args[0];
-                            processPollingFrame(frameData, broadcaster);
+        try {
+            // Hook the correct AOSP method: onPollingLoopDetected(List<PollingFrame>)
+            // Reference: DeviceHost.DeviceHostListener interface
+            XposedHelpers.findAndHookMethod(
+                nfcServiceClass,
+                "onPollingLoopDetected",
+                java.util.List.class,
+                new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        @SuppressWarnings("unchecked")
+                        java.util.List<Object> frames = (java.util.List<Object>) param.args[0];
+                        
+                        XposedBridge.log(TAG + ": onPollingLoopDetected called with " + frames.size() + " frames");
+                        broadcaster.info("Polling loop detected: " + frames.size() + " frames");
+                        
+                        // Process each PollingFrame
+                        for (Object frameObj : frames) {
+                            try {
+                                // PollingFrame has public methods: getType() and getData()
+                                // According to android.nfc.cardemulation.PollingFrame API
+                                Class<?> pollingFrameClass = frameObj.getClass();
+                                
+                                // Use public API methods instead of private fields
+                                Object typeObj = XposedHelpers.callMethod(frameObj, "getType");
+                                Object dataObj = XposedHelpers.callMethod(frameObj, "getData");
+                                
+                                int type = (typeObj instanceof Integer) ? (Integer) typeObj : 0;
+                                byte[] data = (dataObj instanceof byte[]) ? (byte[]) dataObj : new byte[0];
+                                
+                                // Log raw frame data prominently
+                                String hexData = SensfResBuilder.toHexString(data);
+                                broadcaster.info("=== RAW POLLING FRAME ===");
+                                broadcaster.info("Type: " + type);
+                                broadcaster.info("Data: " + hexData);
+                                broadcaster.info("Length: " + data.length + " bytes");
+                                broadcaster.debug("PollingFrame object: " + frameObj.getClass().getName());
+                                
+                                // Also log to Xposed bridge for debugging
+                                XposedBridge.log(TAG + ": RAW FRAME - Type=" + type + " Data=" + hexData);
+                                
+                                // Process the frame data to detect SENSF_REQ
+                                processPollingFrame(data, broadcaster);
+                            } catch (Exception e) {
+                                broadcaster.error("Failed to parse PollingFrame: " + e.getMessage());
+                            }
                         }
                     }
-                );
-                broadcaster.info("Hooked: NfcService." + methodName);
-                return;
-            } catch (NoSuchMethodError e) {
-                // Try next method name
-            }
-        }
-        
-        broadcaster.warn("No polling loop method found in NfcService");
-    }
-    
-    /**
-     * Hook NfcDispatcher for polling frame handling
-     */
-    private static void hookNfcDispatcher(LoadPackageParam lpparam, LogBroadcaster broadcaster) {
-        Class<?> dispatcherClass = XposedHelpers.findClassIfExists(
-            "com.android.nfc.NfcDispatcher", lpparam.classLoader);
-        
-        if (dispatcherClass == null) {
-            return;
-        }
-        
-        // Hook dispatch method that handles NFC events
-        try {
-            XposedHelpers.findAndHookMethod(
-                dispatcherClass,
-                "dispatchTag",
-                "android.nfc.Tag",
-                new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        XposedBridge.log(TAG + ": dispatchTag called");
-                        broadcaster.debug("NfcDispatcher.dispatchTag called");
-                    }
                 }
             );
-        } catch (NoSuchMethodError e) {
-            // Method may not exist in this version
-        }
-    }
-    
-    /**
-     * Attempt to hook native JNI notification handler
-     */
-    private static void hookNativeNotification(LoadPackageParam lpparam, LogBroadcaster broadcaster) {
-        // NfcJniNative or similar class handles JNI calls
-        Class<?> jniClass = XposedHelpers.findClassIfExists(
-            "com.android.nfc.dhimpl.NativeNfcManager", lpparam.classLoader);
-        
-        if (jniClass == null) {
-            jniClass = XposedHelpers.findClassIfExists(
-                "com.android.nfc.NfcJniNative", lpparam.classLoader);
-        }
-        
-        if (jniClass == null) {
-            return;
-        }
-        
-        // Try to hook notification callbacks
-        try {
-            XposedHelpers.findAndHookMethod(
-                jniClass,
-                "notifyPollingLoopFrame",
-                int.class, byte[].class,
-                new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
-                        int type = (int) param.args[0];
-                        byte[] data = (byte[]) param.args[1];
-                        broadcaster.debug("Native polling frame: type=" + type);
-                        processPollingFrame(data, broadcaster);
-                    }
-                }
-            );
-            broadcaster.info("Hooked native polling frame notification");
-        } catch (NoSuchMethodError e) {
-            // Method not found
+            broadcaster.info("✓ Hooked: NfcService.onPollingLoopDetected(List<PollingFrame>)");
+            
+        } catch (Throwable t) {
+            broadcaster.error("Failed to hook onPollingLoopDetected: " + t.getMessage());
+            XposedBridge.log(TAG + ": Failed to hook onPollingLoopDetected: " + t.getMessage());
         }
     }
     
