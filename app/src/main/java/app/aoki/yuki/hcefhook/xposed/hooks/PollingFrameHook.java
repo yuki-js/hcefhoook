@@ -9,6 +9,7 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam;
 
 import app.aoki.yuki.hcefhook.core.Constants;
 import app.aoki.yuki.hcefhook.core.SensfResBuilder;
+import app.aoki.yuki.hcefhook.observemode.ObserveModeManager;
 import app.aoki.yuki.hcefhook.xposed.LogBroadcaster;
 
 /**
@@ -17,6 +18,9 @@ import app.aoki.yuki.hcefhook.xposed.LogBroadcaster;
  * When Observe Mode is enabled, the NFCC sends polling frame data
  * to the host via NCI_ANDROID_POLLING_FRAME_NTF notifications.
  * This hook intercepts those notifications to detect SENSF_REQ.
+ * 
+ * CRITICAL INTEGRATION: This hook feeds polling frames to ObserveModeManager
+ * which performs SENSF_REQ detection and triggers response injection.
  * 
  * Target: NfcService or NfcDispatcher classes that handle polling frames
  * 
