@@ -3,6 +3,9 @@ package app.aoki.yuki.hcefhook.xposed.hooks;
 import android.content.Context;
 
 import java.lang.reflect.Method;
+import java.util.Arrays;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import de.robv.android.xposed.XC_MethodHook;
@@ -36,6 +39,15 @@ public class SendRawFrameHook {
     // Pending SENSF_RES to inject
     private static byte[] pendingInjection = null;
     private static final AtomicBoolean injectionPending = new AtomicBoolean(false);
+    private static final ExecutorService sprayExecutor =
+        Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "hcef-spray");
+            t.setDaemon(true);
+            return t;
+        });
+    static {
+        Runtime.getRuntime().addShutdownHook(new Thread(sprayExecutor::shutdown));
+    }
     
     // Reference to native NFC manager for calling send methods
     private static Object nativeNfcManagerInstance = null;
@@ -60,6 +72,33 @@ public class SendRawFrameHook {
         
         // Attempt immediate injection if manager is available
         attemptInjection();
+    }
+
+    /**
+     * Spray multiple SENSF_RES frames to improve reliability
+     */
+    public static void spraySensfRes(byte[] sensfRes, int count, long intervalMs) {
+        if (sensfRes == null || count <= 0) {
+            return;
+        }
+        final byte[] frame = sensfRes;
+        sprayExecutor.execute(() -> {
+            for (int i = 0; i < count; i++) {
+                injectSensfRes(frame);
+                if (intervalMs > 0 && i + 1 < count) {
+                    try {
+                        Thread.sleep(intervalMs);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    public static void spraySensfRes(byte[] sensfRes) {
+        spraySensfRes(sensfRes, Constants.SENSF_SPRAY_COUNT, Constants.SENSF_SPRAY_INTERVAL_MS);
     }
     
     /**

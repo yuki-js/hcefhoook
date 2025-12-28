@@ -9,6 +9,7 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam;
 
 import app.aoki.yuki.hcefhook.core.Constants;
+import app.aoki.yuki.hcefhook.nativehook.NativeHook;
 import app.aoki.yuki.hcefhook.xposed.hooks.NfaStateHook;
 import app.aoki.yuki.hcefhook.xposed.hooks.PollingFrameHook;
 import app.aoki.yuki.hcefhook.xposed.hooks.SendRawFrameHook;
@@ -119,6 +120,29 @@ public class XposedInit implements IXposedHookLoadPackage {
         // This is where we inject our SENSF_RES
         SendRawFrameHook.install(lpparam, broadcaster);
         
+        initializeNativeHooks();
         broadcaster.info("All NFC service hooks installed");
+    }
+
+    /**
+     * Initialize native hooks inside the com.android.nfc process
+     */
+    private void initializeNativeHooks() {
+        try {
+            if (NativeHook.isInitialized()) {
+                return;
+            }
+            boolean ok = NativeHook.initialize();
+            if (broadcaster == null) {
+                return;
+            }
+            if (ok) {
+                broadcaster.info("Native hook initialized in com.android.nfc process");
+            } else {
+                broadcaster.warn("Native hook initialization failed in target process");
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(TAG + ": Native hook init error: " + t.getMessage());
+        }
     }
 }

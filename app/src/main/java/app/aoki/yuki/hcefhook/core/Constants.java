@@ -47,6 +47,11 @@ public final class Constants {
     public static final int NFA_DM_RFST_POLL_ACTIVE = 0x04;
     public static final int NFA_DM_RFST_LISTEN_ACTIVE = 0x05;
     public static final int NFA_DM_RFST_LISTEN_SLEEP = 0x06;
+
+    // Spray strategy defaults for repeated SENSF_RES responses
+    // (3 bursts spaced by 10ms to mirror NFC poll cadence while keeping bursts under ~30ms)
+    public static final int SENSF_SPRAY_COUNT = 3;
+    public static final long SENSF_SPRAY_INTERVAL_MS = 10L;
     
     private Constants() {
         // Prevent instantiation

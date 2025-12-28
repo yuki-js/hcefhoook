@@ -262,8 +262,8 @@ public class PollingFrameHook {
                         broadcaster.info("Using custom IDm/PMm from config");
                     }
                     
-                    // Attempt injection via SendRawFrameHook
-                    SendRawFrameHook.injectSensfRes(sensfRes);
+                    // Attempt spray injection via SendRawFrameHook
+                    SendRawFrameHook.spraySensfRes(sensfRes);
                 } else {
                     broadcaster.info("Auto-inject disabled, queuing for manual injection");
                     // Queue for manual injection from app
@@ -272,11 +272,11 @@ public class PollingFrameHook {
             } catch (Exception e) {
                 broadcaster.error("IPC failed: " + e.getMessage());
                 // Fallback to direct injection attempt
-                SendRawFrameHook.injectSensfRes(sensfRes);
+                SendRawFrameHook.spraySensfRes(sensfRes);
             }
         } else {
             // No context, try direct injection
-            SendRawFrameHook.injectSensfRes(sensfRes);
+            SendRawFrameHook.spraySensfRes(sensfRes);
         }
     }
 }
