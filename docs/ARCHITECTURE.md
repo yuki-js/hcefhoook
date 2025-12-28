@@ -180,43 +180,47 @@ SendRawFrameHook.attemptInjection()
       │
       └─► PollingFrameHook.processPollingFrame(frameData, broadcaster)
              │
-             ├─► CRITICAL INTEGRATION POINT 1:
-             │   ObserveModeManager.onPollingFrameReceived(frameData)
-             │      │
-             │      ├─► Parse frameData: check if SENSF_REQ (cmd=0x00)
-             │      ├─► Extract SystemCode: (frameData[2] << 8) | frameData[3]
-             │      ├─► Log detection: "*** SENSF_REQ DETECTED ***"
-             │      │
-             │      └─► IF systemCode == 0xFFFF:
-             │             │
-             │             └─► sensfReqCallback.onSensfReqDetected(frameData, systemCode)
+             ├─► Parse frameData: check if SENSF_REQ (cmd=0x00)
+             ├─► Extract SystemCode: (frameData[2] << 8) | frameData[3]
              │
-             └─► LEGACY: triggerSensfResInjection(broadcaster, context)
+             └─► IF systemCode == 0xFFFF:
                     │
-                    └─► IpcClient.isAutoInjectEnabled()
+                    ├─► broadcaster.info("*** Wildcard SENSF_REQ (SC=FFFF) detected! ***")
+                    │
+                    ├─► CRITICAL INTEGRATION POINT 1 (IPC via Broadcast):
+                    │   broadcaster.notifySensfDetected(frameData, systemCode)
+                    │      │
+                    │      └─► Intent(ACTION_SENSF_DETECTED).sendBroadcast()
+                    │             │
+                    │             └─► Crosses process boundary (android.nfc → app)
+                    │
+                    └─► triggerSensfResInjection(broadcaster, context)
                            │
-                           └─► SendRawFrameHook.injectSensfRes(sensfRes)
+                           └─► IpcClient.isAutoInjectEnabled()
+                                  │
+                                  └─► SendRawFrameHook.injectSensfRes(sensfRes)
 
-5. Callback Execution (app process, via registered callback)
-   ObserveModeManager callback fires
+5. App Process Reception (IPC Broadcast Receiver)
+   LogReceiver.onReceive(Intent: ACTION_SENSF_DETECTED)
       │
-      └─► MainActivity: runOnUiThread(() -> {
+      └─► Extract reqData and systemCode from Intent extras
              │
-             ├─► appendLog("DETECT", "*** SENSF_REQ Detected ***")
-             ├─► Toast.makeText("SENSF_REQ SC=0xFFFF")
-             │
-             └─► IF autoInjectCheck.isChecked():
+             └─► MainActivity.onSensfDetected(reqData, systemCode)
                     │
-                    ├─► Build SENSF_RES from IDm/PMm inputs
-                    │      new SensfResBuilder().setIdm(idm).setPmm(pmm).build()
+                    ├─► appendLog("DETECT", "*** SENSF_REQ Detected ***")
+                    ├─► Toast.makeText("SENSF_REQ SC=0xFFFF")
                     │
-                    ├─► IF sprayModeCheck.isChecked():
-                    │      ipcClient.queueInjection(sensfRes)  // Spray mode
-                    │      └─► Hook will use SprayController
-                    │
-                    └─► ELSE:
-                           ipcClient.queueInjection(sensfRes)  // Single-shot
-                           └─► Hook will use single injection
+                    └─► CRITICAL INTEGRATION POINT 2 (Auto-inject logic):
+                        IF autoInjectCheck.isChecked():
+                           │
+                           ├─► Build SENSF_RES from IDm/PMm inputs
+                           │      new SensfResBuilder().setIdm(idm).setPmm(pmm).build()
+                           │
+                           └─► ipcClient.queueInjection(sensfRes)
+                                  │
+                                  └─► ContentProvider.insert(injection_queue)
+                                         │
+                                         └─► Crosses process boundary (app → android.nfc)
 
 6. Hook-side Injection (android.nfc process)
    SendRawFrameHook.injectSensfRes(sensfRes)
@@ -282,25 +286,26 @@ SendRawFrameHook.attemptInjection()
 
 ### Critical Integration Points Summary
 
-1. **PollingFrameHook → ObserveModeManager** (Line 211 in PollingFrameHook.java)
-   - `ObserveModeManager.onPollingFrameReceived(frameData)` called
-   - ObserveModeManager parses and detects SENSF_REQ
-   - Callback triggers if SystemCode matches
+1. **PollingFrameHook → LogBroadcaster (IPC)** (Line 239 in PollingFrameHook.java)
+   - `broadcaster.notifySensfDetected(frameData, systemCode)` sends Broadcast
+   - Intent crosses process boundary (android.nfc → app)
+   - No direct ObserveModeManager call (deprecated due to process isolation)
 
-2. **MainActivity → ObserveModeManager** (Line 89 in MainActivity.java)
-   - `ObserveModeManager.initialize(this)` in onCreate()
-   - `ObserveModeManager.setSensfReqCallback(...)` registers callback
-   - Callback prepares and queues SENSF_RES via IPC
+2. **LogReceiver → MainActivity** (Line 395 in MainActivity.java)
+   - BroadcastReceiver receives ACTION_SENSF_DETECTED in app process
+   - `MainActivity.onSensfDetected(reqData, systemCode)` callback invoked
+   - Auto-inject logic prepares and queues SENSF_RES via IPC
 
-3. **SendRawFrameHook → SprayController** (Line 63 in SendRawFrameHook.java)
+3. **SendRawFrameHook → SprayController** (Line 64 in SendRawFrameHook.java)
    - Check `DobbyHooks.isSprayModeEnabled()`
    - If true: `SprayController.startSpray(sensfRes)`
    - If false: Single-shot `attemptInjection()`
 
-4. **SendRawFrameHook → NativeNfcManager** (Line 188 in SendRawFrameHook.java)
+4. **SendRawFrameHook → NativeNfcManager** (Line 189 in SendRawFrameHook.java)
    - `cacheTransceiveMethod()` stores transceive method reference
    - `SprayController.setNativeNfcManager(instance, method)`
    - SprayController can now call doTransceive directly
+
 
 ## 重要な注意事項
 
