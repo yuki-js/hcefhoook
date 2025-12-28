@@ -204,6 +204,18 @@ public class PollingFrameHook {
             return;
         }
         
+        broadcaster.debug("Processing polling frame: " + SensfResBuilder.toHexString(frameData));
+        
+        // CRITICAL INTEGRATION: Forward to ObserveModeManager for detection
+        try {
+            ObserveModeManager.onPollingFrameReceived(frameData);
+            broadcaster.debug("Polling frame forwarded to ObserveModeManager");
+        } catch (Exception e) {
+            broadcaster.error("Failed to forward to ObserveModeManager: " + e.getMessage());
+            XposedBridge.log(TAG + ": ObserveModeManager forward error: " + e.getMessage());
+        }
+        
+        // LEGACY: Also maintain existing detection logic for compatibility
         // SENSF_REQ format: [Length][0x00][SC_H][SC_L][RC][TSN]
         // Check if this is a SENSF_REQ (cmd = 0x00)
         int cmd = frameData[1] & 0xFF;
