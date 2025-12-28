@@ -1,0 +1,23 @@
+// Top-level build file
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.2.2'
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        // Xposed API repository
+        maven { url 'https://api.xposed.info/' }
+    }
+}
+
+task clean(type: Delete) {
+    delete rootProject.buildDir
+}

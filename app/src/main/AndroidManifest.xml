@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- NFC Permission -->
+    <uses-permission android:name="android.permission.NFC" />
+    
+    <!-- For reading system state -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:theme="@style/Theme.HcefHook">
+        
+        <activity
+            android:name=".ui.MainActivity"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Log receiver for hook notifications -->
+        <receiver
+            android:name=".core.LogReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="app.aoki.yuki.hcefhook.LOG_ENTRY" />
+                <action android:name="app.aoki.yuki.hcefhook.SENSF_DETECTED" />
+            </intent-filter>
+        </receiver>
+        
+        <!-- IPC Provider for cross-process communication with hooks -->
+        <provider
+            android:name=".ipc.HookIpcProvider"
+            android:authorities="app.aoki.yuki.hcefhook.ipc"
+            android:exported="true"
+            android:grantUriPermissions="true" />
+
+        <!-- Xposed Module Metadata -->
+        <meta-data
+            android:name="xposedmodule"
+            android:value="true" />
+        <meta-data
+            android:name="xposeddescription"
+            android:value="NFC-F Observe Mode SENSF_RES Injection PoC" />
+        <meta-data
+            android:name="xposedminversion"
+            android:value="82" />
+        
+        <!-- LSPosed Scope - Hook NFC service -->
+        <meta-data
+            android:name="xposedscope"
+            android:resource="@array/xposed_scope" />
+    </application>
+
+</manifest>
