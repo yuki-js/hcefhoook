@@ -141,7 +141,11 @@ static bool parse_elf_symbols(const char* filepath, std::vector<SymbolInfo>& sym
     // Read section headers
     lseek(fd, ehdr.e_shoff, SEEK_SET);
     std::vector<Elf64_Shdr> shdrs(ehdr.e_shnum);
-    read(fd, shdrs.data(), sizeof(Elf64_Shdr) * ehdr.e_shnum);
+    ssize_t bytes_read = read(fd, shdrs.data(), sizeof(Elf64_Shdr) * ehdr.e_shnum);
+    if (bytes_read != (ssize_t)(sizeof(Elf64_Shdr) * ehdr.e_shnum)) {
+        close(fd);
+        return false;
+    }
     
     // Find .dynsym and .dynstr sections
     Elf64_Shdr* dynsym_shdr = nullptr;
@@ -163,23 +167,46 @@ static bool parse_elf_symbols(const char* filepath, std::vector<SymbolInfo>& sym
     }
     
     // Read symbol table
-    size_t sym_count = dynsym_shdr->sh_size / sizeof(Elf64_Sym);
+    size_t sym_count = (dynsym_shdr->sh_size > 0 && dynsym_shdr->sh_size % sizeof(Elf64_Sym) == 0) 
+                       ? dynsym_shdr->sh_size / sizeof(Elf64_Sym) 
+                       : 0;
+    if (sym_count == 0) {
+        close(fd);
+        return false;
+    }
+    
     std::vector<Elf64_Sym> syms(sym_count);
     lseek(fd, dynsym_shdr->sh_offset, SEEK_SET);
-    read(fd, syms.data(), dynsym_shdr->sh_size);
+    ssize_t sym_bytes_read = read(fd, syms.data(), dynsym_shdr->sh_size);
+    if (sym_bytes_read != (ssize_t)dynsym_shdr->sh_size) {
+        close(fd);
+        return false;
+    }
     
     // Read string table
     std::vector<char> strtab(dynstr_shdr->sh_size);
     lseek(fd, dynstr_shdr->sh_offset, SEEK_SET);
-    read(fd, strtab.data(), dynstr_shdr->sh_size);
+    ssize_t str_bytes_read = read(fd, strtab.data(), dynstr_shdr->sh_size);
+    if (str_bytes_read != (ssize_t)dynstr_shdr->sh_size) {
+        close(fd);
+        return false;
+    }
     
     // Extract symbols
     for (const auto& sym : syms) {
         if (sym.st_name == 0 || sym.st_value == 0) continue;
         
-        if (sym.st_name < dynstr_shdr->sh_size) {
+        // Validate string table access
+        if (sym.st_name >= dynstr_shdr->sh_size) continue;
+        
+        // Ensure null-terminated string within bounds
+        size_t max_len = dynstr_shdr->sh_size - sym.st_name;
+        const char* name_ptr = &strtab[sym.st_name];
+        size_t name_len = strnlen(name_ptr, max_len);
+        
+        if (name_len < max_len) {
             SymbolInfo info;
-            info.name = &strtab[sym.st_name];
+            info.name = std::string(name_ptr, name_len);
             info.address = sym.st_value;
             info.size = sym.st_size;
             info.bind = ELF64_ST_BIND(sym.st_info);
@@ -240,7 +267,8 @@ static void* resolve_symbol_in_module(const char* module_name, const char* symbo
     void* handle = dlopen(module_name, RTLD_NOW | RTLD_NOLOAD);
     if (handle) {
         void* addr = dlsym(handle, symbol_name);
-        dlclose(handle);  // Clean up handle (RTLD_NOLOAD doesn't increment refcount, but good practice)
+        // RTLD_NOLOAD does increment refcount, so dlclose is necessary
+        dlclose(handle);
         if (addr) {
             LOGI("[DobbySymbolResolver] dlsym found '%s' at %p", symbol_name, addr);
             return addr;

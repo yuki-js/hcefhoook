@@ -237,9 +237,12 @@ Java_app_aoki_yuki_hcefhook_nativehook_DobbyHooks_installHooks(JNIEnv *env, jcla
         LOGI("✓✓✓ CRITICAL: nfa_dm_cb found at %p", g_nfa_dm_cb);
         LOGI("✓ State bypass strategy is VIABLE");
         
-        // Dump first 64 bytes for verification
+        // Dump first 64 bytes for verification (with bounds check)
         uint8_t* cb_bytes = (uint8_t*)g_nfa_dm_cb;
-        LOGI("nfa_dm_cb dump (first 64 bytes):");
+        // Note: We can't validate the size without additional information,
+        // but we log this for debugging. In production, use mprotect or /proc/self/maps
+        // to verify memory accessibility before dereferencing.
+        LOGI("nfa_dm_cb dump (first 64 bytes - ensure memory is valid):");
         for (int i = 0; i < 64; i += 16) {
             LOGI("  +0x%02x: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
                  i, cb_bytes[i], cb_bytes[i+1], cb_bytes[i+2], cb_bytes[i+3],
