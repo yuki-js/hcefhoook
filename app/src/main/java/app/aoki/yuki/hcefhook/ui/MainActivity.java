@@ -58,13 +58,13 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
     private Button testButton;
     private Button injectButton;
     private Button clearButton;
+    private Button observeModeButton;
     private CheckBox autoInjectCheck;
     private CheckBox bypassCheck;
     private TextView statsText;
     
-    // Future UI control for Observe Mode (not yet implemented in layout)
-    // private Button observeModeToggleButton;
-    // private CheckBox sprayModeCheck;
+    // Observe Mode state tracking
+    private boolean observeModeEnabled = false;
     
     // IPC Client for communicating with hooks
     private IpcClient ipcClient;
@@ -120,6 +120,7 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         testButton = findViewById(R.id.testButton);
         injectButton = findViewById(R.id.injectButton);
         clearButton = findViewById(R.id.clearButton);
+        observeModeButton = findViewById(R.id.observeModeButton);
         autoInjectCheck = findViewById(R.id.autoInjectCheck);
         bypassCheck = findViewById(R.id.bypassCheck);
         statsText = findViewById(R.id.statsText);
@@ -141,6 +142,11 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         // Clear log button
         if (clearButton != null) {
             clearButton.setOnClickListener(v -> clearLog());
+        }
+        
+        // Observe Mode toggle button
+        if (observeModeButton != null) {
+            observeModeButton.setOnClickListener(v -> toggleObserveMode());
         }
         
         // Auto-inject checkbox
@@ -415,6 +421,45 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         logBuffer.setLength(0);
         logText.setText("");
         appendLog("INFO", "Log cleared");
+    }
+    
+    /**
+     * Toggle Observe Mode on/off
+     * CRITICAL INTEGRATION: Sends command to Xposed hooks via IPC
+     */
+    private void toggleObserveMode() {
+        observeModeEnabled = !observeModeEnabled;
+        
+        if (observeModeEnabled) {
+            appendLog("INFO", "=== ENABLING OBSERVE MODE ===");
+            appendLog("INFO", "Sending enable command to NFC hooks...");
+            ipcClient.enableObserveMode();
+            
+            // Update button UI
+            if (observeModeButton != null) {
+                observeModeButton.setText("Disable Observe Mode");
+                observeModeButton.setBackgroundTintList(
+                    android.content.res.ColorStateList.valueOf(
+                        getResources().getColor(R.color.observe_mode_enabled, null)));
+            }
+            
+            Toast.makeText(this, "Observe Mode Enable Requested", Toast.LENGTH_SHORT).show();
+            
+        } else {
+            appendLog("INFO", "=== DISABLING OBSERVE MODE ===");
+            appendLog("INFO", "Sending disable command to NFC hooks...");
+            ipcClient.disableObserveMode();
+            
+            // Update button UI
+            if (observeModeButton != null) {
+                observeModeButton.setText("Enable Observe Mode");
+                observeModeButton.setBackgroundTintList(
+                    android.content.res.ColorStateList.valueOf(
+                        getResources().getColor(R.color.observe_mode_disabled, null)));
+            }
+            
+            Toast.makeText(this, "Observe Mode Disable Requested", Toast.LENGTH_SHORT).show();
+        }
     }
     
     // Utility methods

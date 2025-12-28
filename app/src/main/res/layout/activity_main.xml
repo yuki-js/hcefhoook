@@ -151,6 +151,16 @@
             android:textSize="12sp" />
     </LinearLayout>
 
+    <!-- Observe Mode Toggle Button -->
+    <Button
+        android:id="@+id/observeModeButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp"
+        android:text="Enable Observe Mode"
+        android:textSize="12sp"
+        android:backgroundTint="#FF6B35" />
+
     <!-- Log Output -->
     <TextView
         android:layout_width="wrap_content"

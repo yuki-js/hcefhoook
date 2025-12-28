@@ -8,6 +8,8 @@ public final class Constants {
     // Intent actions
     public static final String ACTION_LOG_ENTRY = "app.aoki.yuki.hcefhook.LOG_ENTRY";
     public static final String ACTION_SENSF_DETECTED = "app.aoki.yuki.hcefhook.SENSF_DETECTED";
+    public static final String ACTION_ENABLE_OBSERVE_MODE = "app.aoki.yuki.hcefhook.ENABLE_OBSERVE_MODE";
+    public static final String ACTION_DISABLE_OBSERVE_MODE = "app.aoki.yuki.hcefhook.DISABLE_OBSERVE_MODE";
     
     // Intent extras
     public static final String EXTRA_LOG_MESSAGE = "log_message";
