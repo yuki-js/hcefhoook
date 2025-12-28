@@ -29,6 +29,10 @@ public class XposedInit implements IXposedHookLoadPackage {
     private Context appContext;
     private LogBroadcaster broadcaster;
     
+    // Thread safety for command polling
+    private static volatile boolean commandPollingStarted = false;
+    private static final Object pollingLock = new Object();
+    
     @Override
     public void handleLoadPackage(LoadPackageParam lpparam) throws Throwable {
         // Only hook NFC-related packages
@@ -150,19 +154,63 @@ public class XposedInit implements IXposedHookLoadPackage {
     
     /**
      * Start a background thread to poll for Observe Mode commands
+     * Thread-safe: only starts once
+     * 
+     * CRITICAL: Uses IPC (ContentResolver) to communicate across process boundaries
+     * XposedInit runs in com.android.nfc process, HookIpcProvider in app process
      */
     private void startCommandPolling() {
+        synchronized (pollingLock) {
+            if (commandPollingStarted) {
+                XposedBridge.log(TAG + ": Command polling already started, skipping");
+                return;
+            }
+            commandPollingStarted = true;
+        }
+        
         new Thread(() -> {
             XposedBridge.log(TAG + ": Command polling thread started");
             
+            // Wait for appContext to be available
+            while (appContext == null) {
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    return;
+                }
+            }
+            
+            XposedBridge.log(TAG + ": Context available, starting command polling");
+            
             while (true) {
                 try {
-                    // Check for pending Observe Mode command
-                    String command = app.aoki.yuki.hcefhook.ipc.HookIpcProvider
-                        .getPendingObserveModeCommand();
+                    // CRITICAL FIX: Use IPC via ContentResolver, not direct static method call
+                    // This works across process boundaries (com.android.nfc <-> app.aoki.yuki.hcefhook)
+                    android.content.ContentResolver resolver = appContext.getContentResolver();
+                    android.net.Uri commandUri = android.net.Uri.parse(
+                        "content://app.aoki.yuki.hcefhook.ipc/config/pending_observe_mode_command");
                     
-                    if (command != null) {
-                        XposedBridge.log(TAG + ": Processing command: " + command);
+                    android.database.Cursor cursor = resolver.query(commandUri, null, null, null, null);
+                    String command = null;
+                    
+                    if (cursor != null && cursor.moveToFirst()) {
+                        int valueIndex = cursor.getColumnIndex("value");
+                        if (valueIndex >= 0) {
+                            command = cursor.getString(valueIndex);
+                        }
+                        cursor.close();
+                        
+                        // Clear the command after reading (delete it)
+                        if (command != null) {
+                            android.content.ContentValues cv = new android.content.ContentValues();
+                            cv.put("key", "pending_observe_mode_command");
+                            cv.put("value", "");  // Clear the command
+                            resolver.insert(commandUri, cv);
+                        }
+                    }
+                    
+                    if (command != null && !command.isEmpty()) {
+                        XposedBridge.log(TAG + ": Processing command via IPC: " + command);
                         
                         if ("ENABLE".equals(command)) {
                             boolean success = ObserveModeHook.enableObserveMode();
@@ -189,6 +237,12 @@ public class XposedInit implements IXposedHookLoadPackage {
                     break;
                 } catch (Exception e) {
                     XposedBridge.log(TAG + ": Command polling error: " + e.getMessage());
+                    // Continue polling even on errors
+                    try {
+                        Thread.sleep(1000);
+                    } catch (InterruptedException ie) {
+                        break;
+                    }
                 }
             }
         }).start();
