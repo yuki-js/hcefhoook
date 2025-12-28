@@ -2,12 +2,14 @@ cmake_minimum_required(VERSION 3.22.1)
 
 project("hcefhook")
 
-# For now, build without Dobby due to Android NDK compatibility issues
-# We'll use dlsym-based hooking or include prebuilt Dobby libraries later
+# Native hooking library for NFC stack manipulation
+# This library provides symbol resolution and state management hooks
+# for bypassing NFA state machine checks in Observe Mode
+#
+# NOTE: Full inline hooking (Dobby) requires prebuilt libraries
+# Current implementation uses dlsym-based symbol resolution
 
-# Native hooking library 
 add_library(${PROJECT_NAME} SHARED
-        native_hook.cpp
         dobby_hooks.cpp)
 
 target_link_libraries(${PROJECT_NAME}
@@ -15,5 +17,5 @@ target_link_libraries(${PROJECT_NAME}
         log
         dl)
 
-# TODO: Add prebuilt Dobby library or use alternative hooking method
-# Users can manually add libdobby.a to jniLibs/
+# TODO: Add prebuilt Dobby library for true inline hooking
+# Users can manually add libdobby.a to jniLibs/ for enhanced functionality

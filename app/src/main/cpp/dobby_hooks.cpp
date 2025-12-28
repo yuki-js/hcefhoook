@@ -174,26 +174,36 @@ Java_app_aoki_yuki_hcefhook_nativehook_DobbyHooks_installHooks(JNIEnv *env, jcla
     LOGI("NOTE: Full inline hooking requires Dobby prebuilt library");
     LOGI("Current implementation: Symbol resolution + state management");
     
-    // Open libnfc-nci.so (should already be loaded in android.nfc process)
-    libnfc_handle = dlopen("libnfc-nci.so", RTLD_NOW);
-    if (!libnfc_handle) {
-        LOGE("Failed to open libnfc-nci.so: %s", dlerror());
-        // Try alternative name
-        libnfc_handle = dlopen("libnfc_nci.so", RTLD_NOW);
-        if (!libnfc_handle) {
-            LOGE("Failed to open libnfc_nci.so: %s", dlerror());
+    // Based on Frida detection, the correct library is libstnfc_nci_jni.so
+    // This is the ST Microelectronics NFC JNI implementation
+    libnfc_jni_handle = dlopen("libstnfc_nci_jni.so", RTLD_NOW | RTLD_GLOBAL);
+    if (!libnfc_jni_handle) {
+        LOGE("Failed to open libstnfc_nci_jni.so: %s", dlerror());
+        LOGI("Attempting fallback to generic library names...");
+        
+        // Fallback attempts for different device vendors
+        libnfc_jni_handle = dlopen("libnfc_nci_jni.so", RTLD_NOW | RTLD_GLOBAL);
+        if (!libnfc_jni_handle) {
+            LOGE("Failed to open libnfc_nci_jni.so: %s", dlerror());
             return JNI_FALSE;
         }
     }
-    LOGI("Loaded libnfc-nci.so: %p", libnfc_handle);
+    LOGI("✓ Loaded NFC JNI library: %p", libnfc_jni_handle);
     
-    // Open libnfc_nci_jni.so (JNI bridge)
-    libnfc_jni_handle = dlopen("libnfc_nci_jni.so", RTLD_NOW);
-    if (!libnfc_jni_handle) {
-        LOGW("Failed to open libnfc_nci_jni.so: %s", dlerror());
-        // This is optional, continue anyway
+    // Try to load the underlying NCI library (may be separate or bundled)
+    libnfc_handle = dlopen("libnfc-nci.so", RTLD_NOW | RTLD_GLOBAL);
+    if (!libnfc_handle) {
+        // Try ST-specific library name
+        libnfc_handle = dlopen("nfc_nci.st21nfc.st.so", RTLD_NOW | RTLD_GLOBAL);
+        if (!libnfc_handle) {
+            LOGW("NCI library not separately available (may be bundled in JNI): %s", dlerror());
+            // Use JNI handle as fallback - symbols may be in the same library
+            libnfc_handle = libnfc_jni_handle;
+        } else {
+            LOGI("✓ Loaded ST NCI library: %p", libnfc_handle);
+        }
     } else {
-        LOGI("Loaded libnfc_nci_jni.so: %p", libnfc_jni_handle);
+        LOGI("✓ Loaded NCI library: %p", libnfc_handle);
     }
     
     // Resolve function pointers (and hook if safe)
