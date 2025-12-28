@@ -34,6 +34,11 @@ extern "C" {
 int DobbyHook(void *address, void *fake_func, void **out_origin_func);
 
 /**
+ * Resolve symbol from a specific image using Dobby's resolver
+ */
+void *DobbySymbolResolver(const char *image_name, const char *symbol_name);
+
+/**
  * Remove hook and restore original function
  * 
  * @param address - Address of hooked function

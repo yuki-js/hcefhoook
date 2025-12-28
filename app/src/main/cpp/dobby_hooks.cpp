@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include <errno.h>
 #include <stdint.h>
+#include <limits.h>
 #include <elf.h>
 #include <link.h>
 #include <dobby.h>  // Dobby hooking framework
@@ -59,6 +60,8 @@ static void* libnfc_jni_handle = nullptr;
 static bool hooks_installed = false;
 static bool bypass_enabled = false;
 static bool spray_mode_enabled = false;
+static char primary_lib_path[PATH_MAX] = {0};
+static bool primary_lib_initialized = false;
 
 // Library base addresses (found via /proc/self/maps)
 static uintptr_t libnfc_base_addr = 0;
@@ -238,8 +241,21 @@ static int hook_NFC_SendData(int conn_id, void* p_buf) {
  * IMPORTANT: Dobby creates a proper trampoline, so we CAN call original functions
  */
 static bool resolve_and_hook_function(void* lib_handle, const char* symbol_name, 
-                                     void* hook_func, void** orig_func) {
-    void* target = find_symbol_in_lib(lib_handle, symbol_name);
+                                      void* hook_func, void** orig_func) {
+    void* target = nullptr;
+
+    // Prefer Dobby's built-in symbol resolver when available
+    if (primary_lib_initialized && primary_lib_path[0] != '\0') {
+        target = DobbySymbolResolver(primary_lib_path, symbol_name);
+        if (target) {
+            LOGI("DobbySymbolResolver resolved %s at %p", symbol_name, target);
+        }
+    }
+
+    // Fallback to dlsym if resolver failed
+    if (!target) {
+        target = find_symbol_in_lib(lib_handle, symbol_name);
+    }
     if (!target) {
         LOGW("Cannot resolve %s: symbol not found", symbol_name);
         return false;
@@ -354,6 +370,8 @@ Java_app_aoki_yuki_hcefhook_nativehook_DobbyHooks_installHooks(JNIEnv *env, jcla
     
     const char* primary_lib = found_jni_lib ? nfc_jni_lib_path : nfc_lib_path;
     LOGI("Primary library: %s", primary_lib);
+    snprintf(primary_lib_path, sizeof(primary_lib_path), "%s", primary_lib);
+    primary_lib_initialized = primary_lib_path[0] != '\0';
     
     // Try RTLD_NOLOAD - this gets a handle to already-loaded library
     libnfc_jni_handle = dlopen(primary_lib, RTLD_NOW | RTLD_NOLOAD);

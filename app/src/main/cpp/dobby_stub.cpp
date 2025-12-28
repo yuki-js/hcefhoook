@@ -18,6 +18,7 @@
 
 #include "dobby.h"
 #include <android/log.h>
+#include <dlfcn.h>
 #include <string.h>
 
 #define TAG "Dobby.Stub"
@@ -60,6 +61,39 @@ extern "C" int DobbyHook(void *address, void *fake_func, void **out_origin_func)
     // Return "success" to allow code to continue
     // In real usage, this would actually install the hook
     return 0;
+}
+
+/**
+ * Stub implementation of DobbySymbolResolver
+ */
+extern "C" void *DobbySymbolResolver(const char *image_name, const char *symbol_name) {
+    void *handle = RTLD_DEFAULT;
+    bool handle_from_load = false;
+
+    if (image_name && strlen(image_name) > 0) {
+        handle = dlopen(image_name, RTLD_NOW | RTLD_NOLOAD);
+        if (!handle) {
+            LOGW("DobbySymbolResolver stub: %s not preloaded, trying RTLD_NOW", image_name);
+            handle = dlopen(image_name, RTLD_NOW);
+            handle_from_load = handle != nullptr;
+        }
+        if (!handle) {
+            LOGW("DobbySymbolResolver stub: dlopen(%s) failed: %s", image_name, dlerror());
+            handle = RTLD_DEFAULT;
+        }
+    }
+
+    void *symbol = dlsym(handle, symbol_name);
+    if (!symbol) {
+        LOGW("DobbySymbolResolver stub: symbol %s not found: %s", symbol_name, dlerror());
+    } else {
+        LOGI("DobbySymbolResolver stub: resolved %s -> %p", symbol_name, symbol);
+    }
+
+    if (handle_from_load && handle && handle != RTLD_DEFAULT && handle != RTLD_NEXT) {
+        dlclose(handle);
+    }
+    return symbol;
 }
 
 /**
