@@ -60,6 +60,7 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
     private Button injectButton;
     private Button clearButton;
     private Button observeModeButton;
+    private Button spray100Button;
     private CheckBox autoInjectCheck;
     private CheckBox bypassCheck;
     private TextView statsText;
@@ -148,6 +149,12 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         // Observe Mode toggle button
         if (observeModeButton != null) {
             observeModeButton.setOnClickListener(v -> toggleObserveMode());
+        }
+        
+        // Spray 100x button
+        spray100Button = findViewById(R.id.spray100Button);
+        if (spray100Button != null) {
+            spray100Button.setOnClickListener(v -> sprayFrames100x());
         }
         
         // Auto-inject checkbox
@@ -480,6 +487,113 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
                 Toast.makeText(this, "Observe Mode Disable FAILED", Toast.LENGTH_SHORT).show();
             }
         }
+    }
+    
+    /**
+     * Spray 100 SENSF_RES frames with 3ms interval
+     * 
+     * This implements the "spray strategy" to compensate for the inability
+     * to meet FeliCa's 2.4ms timing constraint in software.
+     * 
+     * IDm = 114514... (custom), PMm = FFFFFF... (wildcard)
+     */
+    private void sprayFrames100x() {
+        appendLog("INFO", "=== SPRAY MODE: 100 SENSF_RES frames @ 3ms interval ===");
+        
+        // Get IDm from input or use default spray IDm
+        String idmHex = idmInput.getText().toString().trim();
+        if (idmHex.isEmpty() || idmHex.length() != 16) {
+            // Default spray IDm: 114514...
+            idmHex = "1145141919810000";
+        }
+        
+        // PMm = FFFFFFFFFFFFFFFF for spray mode
+        String pmmHex = "FFFFFFFFFFFFFFFF";
+        
+        byte[] idm = hexToBytes(idmHex);
+        byte[] pmm = hexToBytes(pmmHex);
+        
+        appendLog("DEBUG", "IDm: " + idmHex);
+        appendLog("DEBUG", "PMm: " + pmmHex);
+        
+        // Build SENSF_RES packet: [Length][0x01][IDm 8B][PMm 8B]
+        byte[] sensfRes = new byte[18];
+        sensfRes[0] = 18; // Length
+        sensfRes[1] = 0x01; // Response code
+        System.arraycopy(idm, 0, sensfRes, 2, 8);
+        System.arraycopy(pmm, 0, sensfRes, 10, 8);
+        
+        final int SPRAY_COUNT = 100;
+        final int SPRAY_INTERVAL_MS = 3;
+        
+        // Disable UI during spray
+        spray100Button.setEnabled(false);
+        spray100Button.setText("Spraying...");
+        
+        // Execute spray in background thread
+        new Thread(() -> {
+            long startTime = System.currentTimeMillis();
+            int successCount = 0;
+            int failCount = 0;
+            
+            appendLogOnUiThread("INFO", "Starting spray: " + SPRAY_COUNT + " frames");
+            
+            for (int i = 0; i < SPRAY_COUNT; i++) {
+                try {
+                    // Send raw frame via IPC (or direct call if available)
+                    boolean success = ipcClient.sendRawFrame(sensfRes);
+                    
+                    if (success) {
+                        successCount++;
+                    } else {
+                        failCount++;
+                    }
+                    
+                    // Log progress every 10 frames
+                    if ((i + 1) % 10 == 0) {
+                        final int current = i + 1;
+                        final int suc = successCount;
+                        final int fail = failCount;
+                        runOnUiThread(() -> appendLog("SPRAY", "Progress: " + current + "/" + SPRAY_COUNT + 
+                            " (OK: " + suc + ", FAIL: " + fail + ")"));
+                    }
+                    
+                    // Sleep between frames
+                    if (i < SPRAY_COUNT - 1) {
+                        Thread.sleep(SPRAY_INTERVAL_MS);
+                    }
+                } catch (InterruptedException e) {
+                    appendLogOnUiThread("ERROR", "Spray interrupted at frame " + i);
+                    break;
+                } catch (Exception e) {
+                    failCount++;
+                    appendLogOnUiThread("ERROR", "Frame " + i + " error: " + e.getMessage());
+                }
+            }
+            
+            long elapsed = System.currentTimeMillis() - startTime;
+            final int finalSuccess = successCount;
+            final int finalFail = failCount;
+            final long finalElapsed = elapsed;
+            
+            runOnUiThread(() -> {
+                appendLog("INFO", "=== SPRAY COMPLETE ===");
+                appendLog("INFO", "Total time: " + finalElapsed + "ms");
+                appendLog("INFO", "Success: " + finalSuccess + ", Fail: " + finalFail);
+                
+                // Re-enable button
+                spray100Button.setEnabled(true);
+                spray100Button.setText("🔥 Spray 100x SENSF_RES (3ms interval)");
+                
+                Toast.makeText(MainActivity.this, 
+                    "Spray complete: " + finalSuccess + "/" + SPRAY_COUNT + " OK",
+                    Toast.LENGTH_SHORT).show();
+            });
+        }).start();
+    }
+    
+    private void appendLogOnUiThread(String level, String message) {
+        runOnUiThread(() -> appendLog(level, message));
     }
     
     // Utility methods
