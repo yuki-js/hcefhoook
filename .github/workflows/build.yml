@@ -74,9 +74,17 @@ jobs:
         retention-days: 30
     
         
+    - name: Build KernelSU Module
+      run: |
+        cd kernelsu_module
+        # Create module zip using MMT structure
+        zip -r9 ../hcefhook-module.zip . -x ".git/*" -x ".gitattributes" -x ".gitignore" -x "*.md"
+        cd ..
+        echo "Module zip created: hcefhook-module.zip"
+        
     - name: Upload KernelSU Module
       uses: actions/upload-artifact@v4
       with:
         name: kernelsu-module
-        path: kernelsu_module
+        path: hcefhook-module.zip
         retention-days: 90
