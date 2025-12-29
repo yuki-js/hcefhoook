@@ -79,6 +79,116 @@ static nfa_dm_is_data_exchange_allowed_t g_orig_nfa_dm_is_data_exchange_allowed 
 #define NFA_DM_CB_DISC_CB_OFFSET    0x00  // disc_cb is typically at start
 #define DISC_CB_DISC_STATE_OFFSET   0x28  // disc_state offset within disc_cb
 
+// ============================================================================
+// Memory Safety Utilities
+// ============================================================================
+
+/**
+ * Make a memory region writable using mprotect (requires root/capability)
+ * This is needed when DobbySymbolResolver returns a read-only pointer
+ * 
+ * @param ptr Pointer to memory region
+ * @param size Size of memory region
+ * @return true if successfully made writable
+ */
+static bool make_memory_writable(void* ptr, size_t size) {
+    if (!ptr || size == 0) {
+        return false;
+    }
+    
+    // Align address to page boundary
+    uintptr_t page_size = sysconf(_SC_PAGESIZE);
+    uintptr_t addr = (uintptr_t)ptr;
+    uintptr_t aligned_addr = addr & ~(page_size - 1);
+    
+    // Check for overflow in aligned_size calculation
+    size_t offset = addr - aligned_addr;
+    if (offset > SIZE_MAX - size || (offset + size) > SIZE_MAX - page_size) {
+        LOGE("Aligned size calculation would overflow");
+        return false;
+    }
+    
+    // Use bit operations for efficiency (page_size is power of 2)
+    size_t aligned_size = ((offset + size + page_size - 1) / page_size) * page_size;
+    
+    LOGI("Attempting to make memory writable:");
+    LOGI("  Original: %p (size: %zu)", ptr, size);
+    LOGI("  Aligned:  %p (size: %zu)", (void*)aligned_addr, aligned_size);
+    
+    // Change memory protection to RW only (no EXEC for security)
+    // We only need write access to modify the state variable
+    int result = mprotect((void*)aligned_addr, aligned_size, PROT_READ | PROT_WRITE| PROT_EXEC);
+    
+    if (result == 0) {
+        LOGI("✓ Memory region successfully made writable (mprotect succeeded)");
+        return true;
+    } else {
+        LOGE("✗ mprotect failed: %s (errno: %d)", strerror(errno), errno);
+        LOGE("This may require root privileges or appropriate capabilities");
+        return false;
+    }
+}
+
+/**
+ * Check if a memory region is accessible by checking /proc/self/maps
+ * This prevents SIGSEGV when attempting to read/write invalid pointers
+ * 
+ * @param ptr Pointer to check
+ * @param size Size of memory region to validate
+ * @param require_write If true, also check for write permission
+ * @return true if memory region is accessible with required permissions
+ */
+static bool is_memory_accessible(void* ptr, size_t size, bool require_write) {
+    if (!ptr || size == 0) {
+        return false;
+    }
+    
+    uintptr_t start_addr = (uintptr_t)ptr;
+    
+    // Check for integer overflow (correct boundary check)
+    if (start_addr > UINTPTR_MAX - size) {
+        LOGE("Memory range calculation would overflow");
+        return false;
+    }
+    
+    // Only compute end_addr after overflow check passes
+    uintptr_t end_addr = start_addr + size;
+    
+    FILE* fp = fopen("/proc/self/maps", "r");
+    if (!fp) {
+        LOGE("Failed to open /proc/self/maps");
+        return false;
+    }
+    
+    char line[1024];
+    bool is_accessible = false;
+    
+    while (fgets(line, sizeof(line), fp)) {
+        uintptr_t region_start, region_end;
+        char perms[5] = {0};  // Initialize to ensure null termination
+        
+        // Parse: address-range perms offset dev inode pathname
+        // Use safer format specifier to prevent buffer overflow
+        if (sscanf(line, "%lx-%lx %4[rwxps-]", &region_start, &region_end, perms) >= 3) {
+            // Check if our memory range [start_addr, end_addr) falls within region [region_start, region_end)
+            // Since both use exclusive upper bounds, end_addr can equal region_end
+            if (start_addr >= region_start && end_addr <= region_end) {
+                // Check if region has required permissions
+                bool has_read = (perms[0] == 'r');
+                bool has_write = (perms[1] == 'w');
+                
+                if (has_read && (!require_write || has_write)) {
+                    is_accessible = true;
+                    break;
+                }
+            }
+        }
+    }
+    
+    fclose(fp);
+    return is_accessible;
+}
+
 /**
  * Get current NFA discovery state from nfa_dm_cb
  */
@@ -91,6 +201,13 @@ static uint8_t get_nfa_discovery_state() {
     uint8_t* disc_state_ptr = (uint8_t*)((uintptr_t)g_nfa_dm_cb + 
                                          NFA_DM_CB_DISC_CB_OFFSET +
                                          DISC_CB_DISC_STATE_OFFSET);
+    
+    // Validate memory before dereferencing to prevent SIGSEGV
+    if (!is_memory_accessible(disc_state_ptr, sizeof(uint8_t), false)) {
+        LOGE("nfa_dm_cb disc_state pointer is not readable: %p", disc_state_ptr);
+        return 0xFF;
+    }
+    
     uint8_t state = *disc_state_ptr;
     
     const char* state_name = "UNKNOWN";
@@ -109,6 +226,7 @@ static uint8_t get_nfa_discovery_state() {
 /**
  * Set NFA discovery state directly (STATE BYPASS)
  * This is the core of our Dobby-based approach
+ * Uses root privileges to make memory writable if needed
  */
 static bool set_nfa_discovery_state(uint8_t new_state) {
     if (!g_nfa_dm_cb) {
@@ -121,6 +239,33 @@ static bool set_nfa_discovery_state(uint8_t new_state) {
     uint8_t* disc_state_ptr = (uint8_t*)((uintptr_t)g_nfa_dm_cb + 
                                          NFA_DM_CB_DISC_CB_OFFSET +
                                          DISC_CB_DISC_STATE_OFFSET);
+    
+    // First, check if memory is readable
+    if (!is_memory_accessible(disc_state_ptr, sizeof(uint8_t), false)) {
+        LOGE("Cannot set state: disc_state pointer is not readable: %p", disc_state_ptr);
+        pthread_mutex_unlock(&g_state_mutex);
+        return false;
+    }
+    
+    // Check if memory is writable, if not try to make it writable
+    if (!is_memory_accessible(disc_state_ptr, sizeof(uint8_t), true)) {
+        LOGW("Memory is read-only, attempting to make it writable with root privileges...");
+        
+        if (!make_memory_writable(disc_state_ptr, sizeof(uint8_t))) {
+            LOGE("Failed to make memory writable, cannot set state");
+            pthread_mutex_unlock(&g_state_mutex);
+            return false;
+        }
+        
+        // Verify it's now writable
+        if (!is_memory_accessible(disc_state_ptr, sizeof(uint8_t), true)) {
+            LOGE("Memory still not writable after mprotect");
+            pthread_mutex_unlock(&g_state_mutex);
+            return false;
+        }
+        
+        LOGI("✓ Memory successfully made writable");
+    }
     
     uint8_t old_state = *disc_state_ptr;
     *disc_state_ptr = new_state;
@@ -247,25 +392,33 @@ Java_app_aoki_yuki_hcefhook_nativehook_DobbyHooks_installHooks(JNIEnv *env, jcla
     
     if (g_nfa_dm_cb) {
         LOGI("✓✓✓ CRITICAL: nfa_dm_cb found at %p", g_nfa_dm_cb);
-        LOGI("✓ State bypass strategy is VIABLE");
         
-        // Dump first 64 bytes for verification (with bounds check)
-        uint8_t* cb_bytes = (uint8_t*)g_nfa_dm_cb;
-        // Note: We can't validate the size without additional information,
-        // but we log this for debugging. In production, use mprotect or /proc/self/maps
-        // to verify memory accessibility before dereferencing.
-        LOGI("nfa_dm_cb dump (first 64 bytes - ensure memory is valid):");
-        for (int i = 0; i < 64; i += 16) {
-            LOGI("  +0x%02x: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
-                 i, cb_bytes[i], cb_bytes[i+1], cb_bytes[i+2], cb_bytes[i+3],
-                 cb_bytes[i+4], cb_bytes[i+5], cb_bytes[i+6], cb_bytes[i+7],
-                 cb_bytes[i+8], cb_bytes[i+9], cb_bytes[i+10], cb_bytes[i+11],
-                 cb_bytes[i+12], cb_bytes[i+13], cb_bytes[i+14], cb_bytes[i+15]);
+        // Validate memory before attempting to dump
+        if (is_memory_accessible(g_nfa_dm_cb, 64, false)) {
+            LOGI("✓ State bypass strategy is VIABLE");
+            LOGI("✓ Memory region verified as readable");
+            
+            // Dump first 64 bytes for verification (memory validated)
+            uint8_t* cb_bytes = (uint8_t*)g_nfa_dm_cb;
+            LOGI("nfa_dm_cb dump (first 64 bytes):");
+            for (int i = 0; i < 64; i += 16) {
+                LOGI("  +0x%02x: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
+                     i, cb_bytes[i], cb_bytes[i+1], cb_bytes[i+2], cb_bytes[i+3],
+                     cb_bytes[i+4], cb_bytes[i+5], cb_bytes[i+6], cb_bytes[i+7],
+                     cb_bytes[i+8], cb_bytes[i+9], cb_bytes[i+10], cb_bytes[i+11],
+                     cb_bytes[i+12], cb_bytes[i+13], cb_bytes[i+14], cb_bytes[i+15]);
+            }
+            
+            // Display current state
+            uint8_t current_state = get_nfa_discovery_state();
+            LOGI("Current discovery state: 0x%02x", current_state);
+        } else {
+            LOGE("✗ CRITICAL: nfa_dm_cb pointer is not readable!");
+            LOGE("DobbySymbolResolver returned invalid address: %p", g_nfa_dm_cb);
+            LOGE("State bypass will NOT be available");
+            // Invalidate the pointer to prevent future crashes
+            g_nfa_dm_cb = nullptr;
         }
-        
-        // Display current state
-        uint8_t current_state = get_nfa_discovery_state();
-        LOGI("Current discovery state: 0x%02x", current_state);
         
     } else {
         LOGE("✗ CRITICAL: nfa_dm_cb not found!");
