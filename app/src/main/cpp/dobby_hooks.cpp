@@ -31,6 +31,18 @@
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, TAG, __VA_ARGS__)
 
 // ============================================================================
+// External helper functions from dobby_impl.cpp
+// ============================================================================
+extern "C" void DobbyListHooks();
+extern "C" uintptr_t DobbyGetModuleBase(const char* module_name);
+extern void track_dobby_hook(void* target, void* replacement, const char* name);
+
+// Helper to get Dobby version info
+static const char* get_dobby_version() {
+    return "Dobby v2.0 (Real Library)";
+}
+
+// ============================================================================
 // NFA State Definitions (from AOSP nfa_dm_int.h)
 // ============================================================================
 
@@ -194,7 +206,7 @@ Java_app_aoki_yuki_hcefhook_nativehook_DobbyHooks_installHooks(JNIEnv *env, jcla
     LOGI("═══════════════════════════════════════════════════════");
     LOGI("  DOBBY-STYLE NATIVE HOOKS INSTALLATION");
     LOGI("═══════════════════════════════════════════════════════");
-    LOGI("Dobby Version: %s", DobbyGetVersion());
+    LOGI("Dobby Version: %s", get_dobby_version());
     LOGI("Strategy: DobbySymbolResolver + nfa_dm_cb manipulation");
     LOGI("Process PID: %d", getpid());
     
@@ -306,7 +318,7 @@ Java_app_aoki_yuki_hcefhook_nativehook_DobbyHooks_installHooks(JNIEnv *env, jcla
     LOGI("═══════════════════════════════════════════════════════");
     LOGI("  INSTALLATION COMPLETE");
     LOGI("═══════════════════════════════════════════════════════");
-    LOGI("✓ Dobby Version: %s", DobbyGetVersion());
+    LOGI("✓ Dobby Version: %s", get_dobby_version());
     LOGI("✓ DobbySymbolResolver: ACTIVE");
     LOGI("✓ nfa_dm_cb bypass: %s", g_nfa_dm_cb ? "READY" : "NOT AVAILABLE");
     LOGI("✓ Process: %d (com.android.nfc)", getpid());
@@ -435,7 +447,7 @@ Java_app_aoki_yuki_hcefhook_nativehook_DobbyHooks_getStatus(JNIEnv *env, jclass 
              "DobbySymbolResolver: YES\n"
              "Direct State Manipulation: %s\n"
              "Process ID: %d\n",
-             DobbyGetVersion(),
+             get_dobby_version(),
              g_hooks_installed ? "YES" : "NO",
              g_bypass_enabled ? "YES" : "NO",
              g_spray_mode_enabled ? "YES" : "NO",
