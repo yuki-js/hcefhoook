@@ -6,6 +6,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.method.ScrollingMovementMethod;
+import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 import android.widget.CheckBox;
@@ -154,7 +155,8 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
             }
         });
         
-        // Register receiver
+        // Register receiver (moved log before register to avoid race condition)
+        appendLog("DEBUG", "BroadcastIpc registering...");
         broadcastIpc.register();
         appendLog("DEBUG", "BroadcastIpc registered and ready");
     }
@@ -483,10 +485,18 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
                 logBuffer.delete(0, 10000);
             }
             
-            logText.setText(logBuffer.toString());
-            
-            // Auto-scroll to bottom
-            logScrollView.post(() -> logScrollView.fullScroll(View.FOCUS_DOWN));
+            // Defensive check: ensure logText is initialized before using it
+            if (logText != null) {
+                logText.setText(logBuffer.toString());
+                
+                // Auto-scroll to bottom
+                if (logScrollView != null) {
+                    logScrollView.post(() -> logScrollView.fullScroll(View.FOCUS_DOWN));
+                }
+            } else {
+                // Views not yet initialized - log will be displayed when views are ready
+                Log.w(TAG, "appendLog called before views initialized: " + logLine);
+            }
         });
     }
     
