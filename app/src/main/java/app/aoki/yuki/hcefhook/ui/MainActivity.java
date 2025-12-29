@@ -434,22 +434,49 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
     /**
      * Toggle Observe Mode on/off
      * 
-     * Uses ObserveModeManager for clean, reflection-free implementation.
-     * The manager handles IPC communication with Xposed hooks which call
-     * the official NfcService.setObserveMode() method.
+     * CRITICAL FIX: Enable Observe Mode directly in MainActivity using NfcAdapter API.
+     * This is the CORRECT way - MainActivity runs in app process and has direct access to NfcAdapter.
+     * 
+     * DO NOT enable via IPC to Xposed hooks! Hooks should be PASSIVE observers only.
+     * Observe Mode is tied to the Activity lifecycle, so it MUST be controlled from the Activity.
      */
     private void toggleObserveMode() {
+        // Get NfcAdapter - we're in the app process so this works
+        android.nfc.NfcAdapter nfcAdapter = android.nfc.NfcAdapter.getDefaultAdapter(this);
+        
+        if (nfcAdapter == null) {
+            appendLog("ERROR", "NFC is not available on this device");
+            Toast.makeText(this, "NFC not available", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        if (!nfcAdapter.isEnabled()) {
+            appendLog("ERROR", "NFC is disabled - please enable NFC first");
+            Toast.makeText(this, "Please enable NFC first", Toast.LENGTH_LONG).show();
+            return;
+        }
+        
         boolean currentState = observeModeManager.isObserveModeEnabled();
         boolean newState = !currentState;
         
         if (newState) {
             appendLog("INFO", "=== ENABLING OBSERVE MODE ===");
-            appendLog("INFO", "Using ObserveModeManager (no reflection)");
+            appendLog("INFO", "Calling NfcAdapter.setObserveModeEnabled(true) DIRECTLY from MainActivity");
+            appendLog("INFO", "This is the CORRECT approach - Activity controls Observe Mode, NOT hooks!");
             
-            boolean success = observeModeManager.enableObserveMode();
-            
-            if (success) {
-                appendLog("INFO", "✓ Observe Mode enabled successfully");
+            try {
+                // Call the official Android API directly
+                // This requires reflection since setObserveModeEnabled is hidden API
+                java.lang.reflect.Method setObserveModeMethod = nfcAdapter.getClass().getMethod(
+                    "setObserveModeEnabled", boolean.class);
+                setObserveModeMethod.invoke(nfcAdapter, true);
+                
+                appendLog("INFO", "✓✓✓ Observe Mode ENABLED via NfcAdapter.setObserveModeEnabled(true)");
+                appendLog("INFO", "NFCC is now in passive observation mode");
+                appendLog("INFO", "eSE will NOT respond to SENSF_REQ (SC=FFFF)");
+                
+                // Update local state
+                observeModeManager.isObserveModeEnabled = true;
                 
                 // Update button UI
                 if (observeModeButton != null) {
@@ -460,18 +487,42 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
                 }
                 
                 Toast.makeText(this, "Observe Mode ENABLED", Toast.LENGTH_SHORT).show();
-            } else {
-                appendLog("ERROR", "✗ Failed to enable Observe Mode");
+                
+                // Verify state
+                try {
+                    java.lang.reflect.Method isObserveModeEnabledMethod = nfcAdapter.getClass().getMethod(
+                        "isObserveModeEnabled");
+                    boolean verified = (boolean) isObserveModeEnabledMethod.invoke(nfcAdapter);
+                    appendLog("INFO", "Verified: isObserveModeEnabled() = " + verified);
+                } catch (Exception e) {
+                    appendLog("WARN", "Could not verify state: " + e.getMessage());
+                }
+                
+            } catch (NoSuchMethodException e) {
+                appendLog("ERROR", "setObserveModeEnabled() method not found");
+                appendLog("ERROR", "This device may not support Observe Mode (Android 15+ required)");
+                Toast.makeText(this, "Observe Mode not supported on this device", Toast.LENGTH_LONG).show();
+            } catch (Exception e) {
+                appendLog("ERROR", "Failed to enable Observe Mode: " + e.getMessage());
+                e.printStackTrace();
                 Toast.makeText(this, "Observe Mode Enable FAILED", Toast.LENGTH_SHORT).show();
             }
             
         } else {
             appendLog("INFO", "=== DISABLING OBSERVE MODE ===");
+            appendLog("INFO", "Calling NfcAdapter.setObserveModeEnabled(false) DIRECTLY from MainActivity");
             
-            boolean success = observeModeManager.disableObserveMode();
-            
-            if (success) {
-                appendLog("INFO", "✓ Observe Mode disabled successfully");
+            try {
+                // Call the official Android API directly
+                java.lang.reflect.Method setObserveModeMethod = nfcAdapter.getClass().getMethod(
+                    "setObserveModeEnabled", boolean.class);
+                setObserveModeMethod.invoke(nfcAdapter, false);
+                
+                appendLog("INFO", "✓ Observe Mode DISABLED via NfcAdapter.setObserveModeEnabled(false)");
+                appendLog("INFO", "NFCC returned to normal mode");
+                
+                // Update local state
+                observeModeManager.isObserveModeEnabled = false;
                 
                 // Update button UI
                 if (observeModeButton != null) {
@@ -482,8 +533,9 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
                 }
                 
                 Toast.makeText(this, "Observe Mode DISABLED", Toast.LENGTH_SHORT).show();
-            } else {
-                appendLog("ERROR", "✗ Failed to disable Observe Mode");
+                
+            } catch (Exception e) {
+                appendLog("ERROR", "Failed to disable Observe Mode: " + e.getMessage());
                 Toast.makeText(this, "Observe Mode Disable FAILED", Toast.LENGTH_SHORT).show();
             }
         }

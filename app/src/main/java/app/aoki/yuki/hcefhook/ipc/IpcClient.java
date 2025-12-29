@@ -240,34 +240,29 @@ public class IpcClient {
     
     /**
      * Enable Observe Mode
-     * Sends command to Xposed hooks to enable NFC Observe Mode
+     * 
+     * DEPRECATED: This IPC-based approach is architecturally incorrect.
+     * MainActivity should call NfcAdapter.setObserveModeEnabled(true) directly.
+     * 
+     * WHY: Observe Mode is Activity-bound and must be controlled by the Activity.
+     * Using IPC to delegate this to hooks running in another process is wrong.
      */
+    @Deprecated
     public void enableObserveMode() {
-        Log.i(TAG, "enableObserveMode() - Requesting Observe Mode activation");
-        try {
-            ContentValues cv = new ContentValues();
-            cv.put("action", "ENABLE_OBSERVE_MODE");
-            resolver.insert(CONFIG_URI, cv);
-            Log.i(TAG, "enableObserveMode() - Command sent successfully");
-        } catch (Exception e) {
-            Log.e(TAG, "enableObserveMode() - Failed: " + e.getMessage());
-        }
+        Log.w(TAG, "enableObserveMode() - DEPRECATED!");
+        Log.w(TAG, "MainActivity should call NfcAdapter.setObserveModeEnabled(true) directly");
+        Log.w(TAG, "Using IPC for Observe Mode control is architecturally incorrect");
     }
     
     /**
      * Disable Observe Mode
-     * Sends command to Xposed hooks to disable NFC Observe Mode
+     * 
+     * DEPRECATED: MainActivity should call NfcAdapter.setObserveModeEnabled(false) directly.
      */
+    @Deprecated
     public void disableObserveMode() {
-        Log.i(TAG, "disableObserveMode() - Requesting Observe Mode deactivation");
-        try {
-            ContentValues cv = new ContentValues();
-            cv.put("action", "DISABLE_OBSERVE_MODE");
-            resolver.insert(CONFIG_URI, cv);
-            Log.i(TAG, "disableObserveMode() - Command sent successfully");
-        } catch (Exception e) {
-            Log.e(TAG, "disableObserveMode() - Failed: " + e.getMessage());
-        }
+        Log.w(TAG, "disableObserveMode() - DEPRECATED!");
+        Log.w(TAG, "MainActivity should call NfcAdapter.setObserveModeEnabled(false) directly");
     }
     
     /**
