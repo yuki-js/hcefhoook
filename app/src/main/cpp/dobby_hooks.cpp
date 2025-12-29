@@ -84,15 +84,27 @@ static nfa_dm_is_data_exchange_allowed_t g_orig_nfa_dm_is_data_exchange_allowed 
 // ============================================================================
 
 /**
- * Check if a memory region is readable by checking /proc/self/maps
- * This prevents SIGSEGV when attempting to read invalid pointers
+ * Check if a memory region is accessible by checking /proc/self/maps
+ * This prevents SIGSEGV when attempting to read/write invalid pointers
+ * 
+ * @param ptr Pointer to check
+ * @param size Size of memory region to validate
+ * @param require_write If true, also check for write permission
+ * @return true if memory region is accessible with required permissions
  */
-static bool is_memory_readable(void* ptr, size_t size) {
+static bool is_memory_accessible(void* ptr, size_t size, bool require_write) {
     if (!ptr || size == 0) {
         return false;
     }
     
     uintptr_t start_addr = (uintptr_t)ptr;
+    
+    // Check for integer overflow
+    if (start_addr > UINTPTR_MAX - size) {
+        LOGE("Memory range calculation would overflow");
+        return false;
+    }
+    
     uintptr_t end_addr = start_addr + size;
     
     FILE* fp = fopen("/proc/self/maps", "r");
@@ -102,19 +114,23 @@ static bool is_memory_readable(void* ptr, size_t size) {
     }
     
     char line[1024];
-    bool is_readable = false;
+    bool is_accessible = false;
     
     while (fgets(line, sizeof(line), fp)) {
         uintptr_t region_start, region_end;
-        char perms[5];
+        char perms[5] = {0};  // Initialize to ensure null termination
         
         // Parse: address-range perms offset dev inode pathname
-        if (sscanf(line, "%lx-%lx %4s", &region_start, &region_end, perms) >= 3) {
+        // Use safer format specifier to prevent buffer overflow
+        if (sscanf(line, "%lx-%lx %4[rwxps-]", &region_start, &region_end, perms) >= 3) {
             // Check if our memory range falls within this region
             if (start_addr >= region_start && end_addr <= region_end) {
-                // Check if region has read permission
-                if (perms[0] == 'r') {
-                    is_readable = true;
+                // Check if region has required permissions
+                bool has_read = (perms[0] == 'r');
+                bool has_write = (perms[1] == 'w');
+                
+                if (has_read && (!require_write || has_write)) {
+                    is_accessible = true;
                     break;
                 }
             }
@@ -122,7 +138,7 @@ static bool is_memory_readable(void* ptr, size_t size) {
     }
     
     fclose(fp);
-    return is_readable;
+    return is_accessible;
 }
 
 /**
@@ -139,7 +155,7 @@ static uint8_t get_nfa_discovery_state() {
                                          DISC_CB_DISC_STATE_OFFSET);
     
     // Validate memory before dereferencing to prevent SIGSEGV
-    if (!is_memory_readable(disc_state_ptr, sizeof(uint8_t))) {
+    if (!is_memory_accessible(disc_state_ptr, sizeof(uint8_t), false)) {
         LOGE("nfa_dm_cb disc_state pointer is not readable: %p", disc_state_ptr);
         return 0xFF;
     }
@@ -176,7 +192,7 @@ static bool set_nfa_discovery_state(uint8_t new_state) {
                                          DISC_CB_DISC_STATE_OFFSET);
     
     // Validate memory is readable/writable before accessing to prevent SIGSEGV
-    if (!is_memory_readable(disc_state_ptr, sizeof(uint8_t))) {
+    if (!is_memory_accessible(disc_state_ptr, sizeof(uint8_t), true)) {
         LOGE("Cannot set state: disc_state pointer is not accessible: %p", disc_state_ptr);
         pthread_mutex_unlock(&g_state_mutex);
         return false;
@@ -309,7 +325,7 @@ Java_app_aoki_yuki_hcefhook_nativehook_DobbyHooks_installHooks(JNIEnv *env, jcla
         LOGI("✓✓✓ CRITICAL: nfa_dm_cb found at %p", g_nfa_dm_cb);
         
         // Validate memory before attempting to dump
-        if (is_memory_readable(g_nfa_dm_cb, 64)) {
+        if (is_memory_accessible(g_nfa_dm_cb, 64, false)) {
             LOGI("✓ State bypass strategy is VIABLE");
             LOGI("✓ Memory region verified as readable");
             
