@@ -15,6 +15,7 @@ log() {
     echo "[HCE-F Hook KSU] $*"
 }
 
+
 log "=== HCE-F Hook KernelSU Module Starting ==="
 log "Module directory: $MODDIR"
 log "User ID: $(id -u)"
@@ -27,44 +28,41 @@ fi
 
 log "Root access confirmed"
 
-# Create overlay directory for vendor config files
-OVERLAY_DIR="$MODDIR/system/vendor/etc"
-mkdir -p "$OVERLAY_DIR"
+override_key() {
+    local FILE="$1"
+    local KEY="$2"
+    local NEW_VALUE="$3"
+
+    if grep -qE "^\s*$KEY\s*=" "$FILE"; then
+        log "Overriding $KEY in $FILE to $NEW_VALUE"
+        sed -i -E "s|^\s*($KEY\s*=).*|\1 $NEW_VALUE|g" "$FILE"
+    else
+        log "Adding $KEY to $FILE with value $NEW_VALUE"
+        echo "$KEY = $NEW_VALUE" >> "$FILE"
+    fi
+}
 
 # Check if libnfc-nci.conf exists on device
-VENDOR_NFC_CONF="/vendor/etc/libnfc-nci.conf"
-VENDOR_FELICA_CONF="/vendor/etc/libnfc-nci-felica.conf"
+VENDOR_NFC_CONF="/system/vendor/etc/libnfc-nci.conf"
+VENDOR_FELICA_CONF="/system/vendor/etc/libnfc-nci-felica.conf"
+
+execute_replace_nci() {
+    local TARGET_FILE="$1"
+    local BASENAME="$(basename "$TARGET_FILE")"
+    local MAGISK_REPLACE="$MODDIR/system/vendor/etc/$BASENAME"
+
+    if [ -f "$MAGISK_REPLACE" ]; then
+        log "Deleting previous $TARGET_FILE"
+        rm -f "$TARGET_FILE"
+    fi
+    cp "$TARGET_FILE" "$MAGISK_REPLACE"
+
+    override_key "$MAGISK_REPLACE" "NFC_DEBUG_ENABLED" "1"
+    override_key "$MAGISK_REPLACE" "DEFAULT_SYS_CODE" "{40:00}"
+}
 
 if [ -f "$VENDOR_NFC_CONF" ]; then
-    log "Found $VENDOR_NFC_CONF"
-    
-    # Copy original if our overlay doesn't exist
-    if [ ! -f "$MODDIR/system/vendor/etc/libnfc-nci.conf" ]; then
-        log "Creating overlay config from original"
-        cp "$VENDOR_NFC_CONF" "$MODDIR/system/vendor/etc/libnfc-nci.conf"
-        
-        # Modify configuration for Observe Mode
-        log "Applying Observe Mode patches to libnfc-nci.conf"
-        
-        # Enable NCI Android polling frame notifications (if not already present)
-        if ! grep -q "NCI_ANDROID_POLLING_FRAME_NTF" "$MODDIR/system/vendor/etc/libnfc-nci.conf"; then
-            echo "" >> "$MODDIR/system/vendor/etc/libnfc-nci.conf"
-            echo "###############################################################################" >> "$MODDIR/system/vendor/etc/libnfc-nci.conf"
-            echo "# HCE-F Hook: Enable Observe Mode polling notifications" >> "$MODDIR/system/vendor/etc/libnfc-nci.conf"
-            echo "NCI_ANDROID_POLLING_FRAME_NTF=0x01" >> "$MODDIR/system/vendor/etc/libnfc-nci.conf"
-            log "Added NCI_ANDROID_POLLING_FRAME_NTF"
-        fi
-        
-        # Disable eSE auto-response for wildcard System Code
-        if ! grep -q "ESE_LISTEN_TECH_MASK" "$MODDIR/system/vendor/etc/libnfc-nci.conf"; then
-            echo "ESE_LISTEN_TECH_MASK=0x00" >> "$MODDIR/system/vendor/etc/libnfc-nci.conf"
-            log "Added ESE_LISTEN_TECH_MASK=0x00"
-        fi
-        
-        log "Configuration overlay created successfully"
-    else
-        log "Overlay config already exists, skipping"
-    fi
+    execute_replace_nci $VENDOR_NFC_CONF
 else
     log "WARNING: $VENDOR_NFC_CONF not found on device"
     log "Device may use different NFC configuration path"
@@ -72,39 +70,43 @@ fi
 
 # Handle FeliCa-specific config if it exists
 if [ -f "$VENDOR_FELICA_CONF" ]; then
-    log "Found $VENDOR_FELICA_CONF"
-    
-    if [ ! -f "$MODDIR/system/vendor/etc/libnfc-nci-felica.conf" ]; then
-        log "Creating FeliCa config overlay"
-        cp "$VENDOR_FELICA_CONF" "$MODDIR/system/vendor/etc/libnfc-nci-felica.conf"
-        
-        # Enable Host-based FeliCa emulation
-        if ! grep -q "FELICA_HOST_LISTEN" "$MODDIR/system/vendor/etc/libnfc-nci-felica.conf"; then
-            echo "" >> "$MODDIR/system/vendor/etc/libnfc-nci-felica.conf"
-            echo "###############################################################################" >> "$MODDIR/system/vendor/etc/libnfc-nci-felica.conf"
-            echo "# HCE-F Hook: Enable Host-based FeliCa handling" >> "$MODDIR/system/vendor/etc/libnfc-nci-felica.conf"
-            echo "FELICA_HOST_LISTEN=0x01" >> "$MODDIR/system/vendor/etc/libnfc-nci-felica.conf"
-            echo "FELICA_SYSTEM_CODE=0xFFFF" >> "$MODDIR/system/vendor/etc/libnfc-nci-felica.conf"
-            log "Added FeliCa Host listen configuration"
-        fi
-    else
-        log "FeliCa overlay config already exists, skipping"
-    fi
+    execute_replace_nci $VENDOR_FELICA_CONF
 else
     log "No FeliCa-specific config found (this is normal for most devices)"
 fi
 
-# Set correct permissions for overlay files
-if [ -d "$OVERLAY_DIR" ]; then
-    chmod 755 "$OVERLAY_DIR"
-    chmod 644 "$OVERLAY_DIR"/*.conf 2>/dev/null
-    chown root:root "$OVERLAY_DIR"/*.conf 2>/dev/null
-    log "Permissions set for overlay files"
+
+VENDOR_HALST_CONF="/system/vendor/etc/libnfc-hal-st.conf"
+VENDOR_HALST_P_CONF="/system/vendor/etc/libnfc-hal-st-st54j.conf"
+
+execute_replace_halst() {
+    local TARGET_FILE="$1"
+    local BASENAME="$(basename "$TARGET_FILE")"
+    local MAGISK_REPLACE="$MODDIR/system/vendor/etc/$BASENAME"
+
+    if [ -f "$MAGISK_REPLACE" ]; then
+        log "Deleting previous $TARGET_FILE"
+        rm -f "$TARGET_FILE"
+    fi
+    cp "$TARGET_FILE" "$MAGISK_REPLACE"
+
+    override_key "$MAGISK_REPLACE" "DEFAULT_SYS_CODE_ROUTE" "0x00"
+    override_key "$MAGISK_REPLACE" "DEFAULT_NFCF_ROUTE" "0x00"
+    override_key "$MAGISK_REPLACE" "DEFAULT_ROUTE" "0x00"
+    override_key "$MAGISK_REPLACE" "DEFAULT_ISODEP_ROUTE" "0x00"
+    override_key "$MAGISK_REPLACE" "NFC_DEBUG_ENABLED" "1"
+
+}
+
+if [ -f "$VENDOR_HALST_CONF" ]; then
+    execute_replace_halst $VENDOR_HALST_CONF
+else
+    log "WARNING: $VENDOR_HALST_CONF not found on device"
+    log "Device may use different NFC HAL-ST configuration path"
 fi
 
-# Grant root access to com.android.nfc process (for hooks to work)
-# This will be done via service.sh when NFC service starts
-
-log "=== HCE-F Hook KernelSU Module Complete ==="
-log "Overlay directory: $OVERLAY_DIR"
-log "Next: NFC service will use overlayed configs on next boot"
+if [ -f "$VENDOR_HALST_P_CONF" ]; then
+    execute_replace_halst $VENDOR_HALST_P_CONF
+else
+    log "No HAL-ST FeliCa-specific config found (this is normal for most devices)"
+fi
