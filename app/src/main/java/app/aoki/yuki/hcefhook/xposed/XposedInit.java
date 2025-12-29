@@ -307,28 +307,31 @@ public class XposedInit implements IXposedHookLoadPackage {
             
             if (!libraryFound) {
                 XposedBridge.log(TAG + ": FATAL: NFC library not found after " + MAX_ATTEMPTS + " attempts");
-                XposedBridge.log(TAG + ": Dobby hooks will NOT be installed");
+                XposedBridge.log(TAG + ": Native hooks will NOT be installed");
                 XposedBridge.log(TAG + ": Expected libraries: " + java.util.Arrays.toString(libraryNames));
                 return;
             }
             
-            // Library is loaded, now install hooks
-            XposedBridge.log(TAG + ": NFC library is loaded, installing Dobby hooks...");
+            // Library is loaded, now initialize coordination
+            // NOTE: Dobby has been replaced with Frida for native hooking
+            // This now just logs status and coordinates with Frida script
+            XposedBridge.log(TAG + ": NFC library is loaded, initializing hook coordination...");
             
             try {
                 boolean success = app.aoki.yuki.hcefhook.nativehook.DobbyHooks.install();
                 if (success) {
-                    XposedBridge.log(TAG + ": ✓✓✓ Dobby hooks installed successfully");
+                    XposedBridge.log(TAG + ": ✓✓✓ Hook coordination initialized");
+                    XposedBridge.log(TAG + ": NOTE: For native TX bypass, run Frida script:");
+                    XposedBridge.log(TAG + ":   frida -U -f com.android.nfc -l observe_mode_bypass.js");
                     app.aoki.yuki.hcefhook.nativehook.DobbyHooks.logStatus();
                 } else {
-                    XposedBridge.log(TAG + ": WARNING: Dobby hooks installation failed");
-                    XposedBridge.log(TAG + ": This may indicate symbol resolution issues");
+                    XposedBridge.log(TAG + ": WARNING: Hook coordination initialization failed");
                 }
-            } catch (Throwable dobbyError) {
-                XposedBridge.log(TAG + ": Dobby hook error: " + dobbyError.getMessage());
-                dobbyError.printStackTrace();
+            } catch (Throwable hookError) {
+                XposedBridge.log(TAG + ": Hook coordination error: " + hookError.getMessage());
+                hookError.printStackTrace();
             }
             
-        }, "DobbyHookInstaller").start();
+        }, "NativeHookCoordinator").start();
     }
 }

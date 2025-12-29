@@ -270,6 +270,35 @@ public class IpcClient {
         }
     }
     
+    /**
+     * Send a raw NFC frame via IPC
+     * 
+     * This queues the frame for transmission through the Xposed hooks.
+     * For actual transmission, the hooks must be active in com.android.nfc.
+     * 
+     * NOTE: This is for coordination only. Actual raw frame transmission
+     * requires Frida script running in com.android.nfc process with 
+     * state bypass enabled.
+     * 
+     * @param data Raw frame bytes (e.g., SENSF_RES)
+     * @return true if queued successfully
+     */
+    public boolean sendRawFrame(byte[] data) {
+        Log.d(TAG, "sendRawFrame() - Queuing " + (data != null ? data.length : 0) + " bytes");
+        try {
+            ContentValues cv = new ContentValues();
+            cv.put("action", "SEND_RAW_FRAME");
+            cv.put("data", bytesToHex(data));
+            cv.put("timestamp", System.currentTimeMillis());
+            resolver.insert(INJECTION_URI, cv);
+            Log.v(TAG, "sendRawFrame() - Frame queued successfully");
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "sendRawFrame() - Failed: " + e.getMessage());
+            return false;
+        }
+    }
+    
     // Utility methods
     
     private static String bytesToHex(byte[] bytes) {
