@@ -140,20 +140,20 @@ execute_replace_halst "$VENDOR_HALST_CONF"
 execute_replace_halst "$VENDOR_HALST_P_CONF"
 
 # Patch public.libraries.txt to allow loading NFC JNI libraries
-PUBLIC_LIBS="/system/etc/public.libraries.txt"
-OVERLAY_PUBLIC_LIBS="$MODPATH/system/etc/public.libraries.txt"
+PUBLIC_LIBS="/system/vendor/etc/public.libraries.txt"
+OVERLAY_PUBLIC_LIBS="$MODPATH/system/vendor/etc/public.libraries.txt"
 
 if [ -f "$PUBLIC_LIBS" ]; then
     cp "$PUBLIC_LIBS" "$OVERLAY_PUBLIC_LIBS"
     
     # Add NFC JNI libraries if not present
     if ! grep -q "libstnfc_nci_jni.so" "$OVERLAY_PUBLIC_LIBS" 2>/dev/null; then
-        echo "libstnfc_nci_jni.so" >> "$OVERLAY_PUBLIC_LIBS"
+        echo "libstnfc_nci_jni.so 64" >> "$OVERLAY_PUBLIC_LIBS"
         log_install "Added libstnfc_nci_jni.so to public.libraries.txt"
     fi
     
     if ! grep -q "libnfc_nci_jni.so" "$OVERLAY_PUBLIC_LIBS" 2>/dev/null; then
-        echo "libnfc_nci_jni.so" >> "$OVERLAY_PUBLIC_LIBS"
+        echo "libnfc_nci_jni.so 64" >> "$OVERLAY_PUBLIC_LIBS"
         log_install "Added libnfc_nci_jni.so to public.libraries.txt"
     fi
     
