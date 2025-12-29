@@ -117,7 +117,7 @@ static bool make_memory_writable(void* ptr, size_t size) {
     
     // Change memory protection to RW only (no EXEC for security)
     // We only need write access to modify the state variable
-    int result = mprotect((void*)aligned_addr, aligned_size, PROT_READ | PROT_WRITE);
+    int result = mprotect((void*)aligned_addr, aligned_size, PROT_READ | PROT_WRITE| PROT_EXEC);
     
     if (result == 0) {
         LOGI("✓ Memory region successfully made writable (mprotect succeeded)");
