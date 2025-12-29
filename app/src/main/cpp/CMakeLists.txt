@@ -2,23 +2,36 @@ cmake_minimum_required(VERSION 3.22.1)
 
 project("hcefhook")
 
-# Native library for HCE-F Hook
-# 
-# NOTE: Dobby has been removed in favor of Frida for hooking.
-# This library now provides only utility functions.
-# For actual native hooking, use the Frida script at:
-#   assets/frida/observe_mode_bypass.js
+# Native hooking library for NFC stack manipulation
+# This library provides Dobby hooking functionality for bypassing NFA state machine
+# checks in Observe Mode
 #
-# Run with: frida -U -f com.android.nfc -l observe_mode_bypass.js
+# DOBBY LIBRARY INTEGRATION:
+# ==========================
+# Built from https://github.com/jmpews/Dobby (Apache License 2.0)
+# - libdobby.so: Prebuilt for arm64-v8a (located in jniLibs)
+# - Provides DobbyHook, DobbySymbolResolver, and other hooking APIs
+# - Direct nfa_dm_cb manipulation for state bypass
+# - Support for libstnfc_nci_jni.so (real device) and libnfc_nci_jni.so (AOSP)
 
 # C++ Standard
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Simple utility library (no Dobby)
+# Include Dobby header directory
+include_directories(dobby/include)
+
+# Import prebuilt Dobby library
+add_library(dobby SHARED IMPORTED)
+set_target_properties(dobby PROPERTIES
+        IMPORTED_LOCATION ${CMAKE_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libdobby.so)
+
 add_library(${PROJECT_NAME} SHARED
-        native_utils.cpp)
+        dobby_hooks.cpp
+        dobby_impl.cpp)  # Wrapper around Dobby functionality
 
 target_link_libraries(${PROJECT_NAME}
+        dobby
         android
-        log)
+        log
+        dl)
