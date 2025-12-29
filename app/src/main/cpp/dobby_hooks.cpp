@@ -84,6 +84,42 @@ static nfa_dm_is_data_exchange_allowed_t g_orig_nfa_dm_is_data_exchange_allowed 
 // ============================================================================
 
 /**
+ * Make a memory region writable using mprotect (requires root/capability)
+ * This is needed when DobbySymbolResolver returns a read-only pointer
+ * 
+ * @param ptr Pointer to memory region
+ * @param size Size of memory region
+ * @return true if successfully made writable
+ */
+static bool make_memory_writable(void* ptr, size_t size) {
+    if (!ptr || size == 0) {
+        return false;
+    }
+    
+    // Align address to page boundary
+    uintptr_t page_size = sysconf(_SC_PAGESIZE);
+    uintptr_t addr = (uintptr_t)ptr;
+    uintptr_t aligned_addr = addr & ~(page_size - 1);
+    size_t aligned_size = ((addr - aligned_addr) + size + page_size - 1) & ~(page_size - 1);
+    
+    LOGI("Attempting to make memory writable:");
+    LOGI("  Original: %p (size: %zu)", ptr, size);
+    LOGI("  Aligned:  %p (size: %zu)", (void*)aligned_addr, aligned_size);
+    
+    // Try to change memory protection to RWX
+    int result = mprotect((void*)aligned_addr, aligned_size, PROT_READ | PROT_WRITE | PROT_EXEC);
+    
+    if (result == 0) {
+        LOGI("✓ Memory region successfully made writable (mprotect succeeded)");
+        return true;
+    } else {
+        LOGE("✗ mprotect failed: %s (errno: %d)", strerror(errno), errno);
+        LOGE("This may require root/CAP_SYS_RAWIO capability");
+        return false;
+    }
+}
+
+/**
  * Check if a memory region is accessible by checking /proc/self/maps
  * This prevents SIGSEGV when attempting to read/write invalid pointers
  * 
@@ -99,12 +135,13 @@ static bool is_memory_accessible(void* ptr, size_t size, bool require_write) {
     
     uintptr_t start_addr = (uintptr_t)ptr;
     
-    // Check for integer overflow
-    if (start_addr > UINTPTR_MAX - size) {
+    // Check for integer overflow (fixed: correct boundary check)
+    if (size > 0 && start_addr > UINTPTR_MAX - size + 1) {
         LOGE("Memory range calculation would overflow");
         return false;
     }
     
+    // Only compute end_addr after overflow check passes
     uintptr_t end_addr = start_addr + size;
     
     FILE* fp = fopen("/proc/self/maps", "r");
@@ -123,8 +160,8 @@ static bool is_memory_accessible(void* ptr, size_t size, bool require_write) {
         // Parse: address-range perms offset dev inode pathname
         // Use safer format specifier to prevent buffer overflow
         if (sscanf(line, "%lx-%lx %4[rwxps-]", &region_start, &region_end, perms) >= 3) {
-            // Check if our memory range falls within this region
-            if (start_addr >= region_start && end_addr <= region_end) {
+            // Check if our memory range falls within this region (exclusive end)
+            if (start_addr >= region_start && end_addr < region_end) {
                 // Check if region has required permissions
                 bool has_read = (perms[0] == 'r');
                 bool has_write = (perms[1] == 'w');
@@ -178,6 +215,7 @@ static uint8_t get_nfa_discovery_state() {
 /**
  * Set NFA discovery state directly (STATE BYPASS)
  * This is the core of our Dobby-based approach
+ * Uses root privileges to make memory writable if needed
  */
 static bool set_nfa_discovery_state(uint8_t new_state) {
     if (!g_nfa_dm_cb) {
@@ -191,11 +229,31 @@ static bool set_nfa_discovery_state(uint8_t new_state) {
                                          NFA_DM_CB_DISC_CB_OFFSET +
                                          DISC_CB_DISC_STATE_OFFSET);
     
-    // Validate memory is readable/writable before accessing to prevent SIGSEGV
-    if (!is_memory_accessible(disc_state_ptr, sizeof(uint8_t), true)) {
-        LOGE("Cannot set state: disc_state pointer is not accessible: %p", disc_state_ptr);
+    // First, check if memory is readable
+    if (!is_memory_accessible(disc_state_ptr, sizeof(uint8_t), false)) {
+        LOGE("Cannot set state: disc_state pointer is not readable: %p", disc_state_ptr);
         pthread_mutex_unlock(&g_state_mutex);
         return false;
+    }
+    
+    // Check if memory is writable, if not try to make it writable
+    if (!is_memory_accessible(disc_state_ptr, sizeof(uint8_t), true)) {
+        LOGW("Memory is read-only, attempting to make it writable with root privileges...");
+        
+        if (!make_memory_writable(disc_state_ptr, sizeof(uint8_t))) {
+            LOGE("Failed to make memory writable, cannot set state");
+            pthread_mutex_unlock(&g_state_mutex);
+            return false;
+        }
+        
+        // Verify it's now writable
+        if (!is_memory_accessible(disc_state_ptr, sizeof(uint8_t), true)) {
+            LOGE("Memory still not writable after mprotect");
+            pthread_mutex_unlock(&g_state_mutex);
+            return false;
+        }
+        
+        LOGI("✓ Memory successfully made writable");
     }
     
     uint8_t old_state = *disc_state_ptr;
