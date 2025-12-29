@@ -1,20 +1,24 @@
 # AOSP NFC Stack - Observe Mode SENSF_RES Injection Analysis
 
+**Target Version: Android 15** (Observe Mode was introduced in Android 15)
+
 ## 1. Executive Summary
 
-This document provides technical analysis of the Android NFC stack (Android 14/15) for Host-based raw SENSF_RES injection in Observe Mode. The goal is to identify blocking factors and potential bypass methods.
+This document provides technical analysis of the Android NFC stack (Android 15) for Host-based raw SENSF_RES injection in Observe Mode. The goal is to identify blocking factors and potential bypass methods.
+
+**IMPORTANT**: Observe Mode is an Android 15 feature. Reference files have been updated to Android 15 (`android-15.0.0_r1`).
 
 ### Key Findings
 
 1. **Primary Blocking Point**: `nfa_dm_act_send_raw_frame()` in libnfc-nci.so
-   - Location: `nfa_dm_act.cc:1104-1105`
+   - Location: `nfa_dm_act.cc:1098-1137` (Android 15)
    - Condition: `disc_state != NFA_DM_RFST_POLL_ACTIVE && disc_state != NFA_DM_RFST_LISTEN_ACTIVE`
    - In Observe Mode, state remains `NFA_DM_RFST_DISCOVERY` (0x01), blocking TX
 
 2. **Global Variables for State Manipulation**:
-   - `nfa_dm_cb`: 0x24c0f8 (1160 bytes)
+   - `nfa_dm_cb`: 0x24c0f8 (1160 bytes) - addresses from real device binary
    - `nfc_cb`: 0x24cf20 (680 bytes)
-   - `disc_state` offset in `nfa_dm_cb.disc_cb`: ~0x02 (tNFA_DM_RF_DISC_STATE)
+   - `disc_state` offset in `nfa_dm_cb.disc_cb`: varies by build
 
 3. **Key Functions for Hooking**:
    - `NFA_SendRawFrame` @ 0x147100 (entry point)
@@ -23,11 +27,17 @@ This document provides technical analysis of the Android NFC stack (Android 14/1
    - `ce_t3t_send_to_lower` @ 0x18bdc0 (T3T specific)
    - `nfc_ncif_send_data` @ 0x184870 (NCI level)
 
+4. **Observe Mode Implementation** (Android 15 specific):
+   - NCI Proprietary Command: `NCI_ANDROID_PASSIVE_OBSERVE` (sub-opcode 0x2)
+   - Query Command: `NCI_QUERY_ANDROID_PASSIVE_OBSERVE` (sub-opcode 0x4)
+   - Polling Frame Notification: `NCI_ANDROID_POLLING_FRAME_NTF` (sub-opcode 0x3)
+   - All under GID `0x0F` (NCI_GID_PROP) and OID `0x0C` (NCI_MSG_PROP_ANDROID)
+
 ---
 
 ## 2. NFA State Machine Analysis
 
-### 2.1 Discovery States (from nfa_dm_int.h:234-244)
+### 2.1 Discovery States (from nfa_dm_int.h:230-238, Android 15)
 
 ```c
 enum {
@@ -46,7 +56,7 @@ enum {
 ### 2.2 Blocking Logic in nfa_dm_act_send_raw_frame()
 
 ```c
-// nfa_dm_act.cc:1098-1137
+// nfa_dm_act.cc:1098-1137 (Android 15)
 bool nfa_dm_act_send_raw_frame(tNFA_DM_MSG* p_data) {
   tNFC_STATUS status = NFC_STATUS_FAILED;
 

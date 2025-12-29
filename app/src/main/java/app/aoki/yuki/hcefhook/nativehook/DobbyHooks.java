@@ -3,193 +3,167 @@ package app.aoki.yuki.hcefhook.nativehook;
 import android.util.Log;
 
 /**
- * Dobby-based native hook interface for NFC stack manipulation
+ * Native hook coordination interface (Frida-based)
  * 
- * This class provides Dobby framework-based runtime hooking of libnfc-nci.so
- * functions. Unlike the basic NativeHook class, this uses Dobby for true
- * inline hooking, allowing interception and modification of function behavior.
+ * NOTE: Dobby has been replaced with Frida for native hooking.
+ * This class provides Java-side coordination and state management.
  * 
- * CRITICAL: This must be loaded and initialized in the android.nfc process,
- * NOT in the hcefhook app package. The Xposed module handles this injection.
+ * For actual native hooking, use the Frida script at:
+ *   assets/frida/observe_mode_bypass.js
  * 
- * Key capabilities:
- * - Hook nfa_dm_is_data_exchange_allowed() to bypass state checks
- * - Hook nfa_dm_act_send_raw_frame() to enable TX in Observe Mode
- * - Hook NFC_SendData() for spray strategy implementation
- * - Enable continuous SENSF_RES transmission (spray mode)
+ * Run with: frida -U -f com.android.nfc -l observe_mode_bypass.js --no-pause
+ * 
+ * IMPORTANT: Native hooks must be installed in the com.android.nfc process,
+ * NOT in the hcefhook app package.
+ * 
+ * Key Hook Targets (from AOSP analysis):
+ * - NFA_SendRawFrame @ 0x147100 (mangled: _Z16NFA_SendRawFramePhtt)
+ * - nfa_dm_act_send_raw_frame @ 0x14e070 (state validation - KEY BLOCKING POINT)
+ * - NFC_SendData @ 0x183240
+ * - nfa_dm_cb @ 0x24c0f8 (state variable location)
+ * 
+ * The primary blocking logic is in nfa_dm_act_send_raw_frame() which checks:
+ *   if (disc_state == NFA_DM_RFST_POLL_ACTIVE || disc_state == NFA_DM_RFST_LISTEN_ACTIVE)
+ * In Observe Mode, disc_state = DISCOVERY (1), not LISTEN_ACTIVE (5), so TX is blocked.
  */
 public class DobbyHooks {
     
-    private static final String TAG = "HcefHook.DobbyHooks";
+    private static final String TAG = "HcefHook.NativeHooks";
     
-    private static boolean isLoaded = false;
-    private static boolean isInitialized = false;
+    // State management (Java-side coordination with Frida)
+    private static volatile boolean bypassEnabled = false;
+    private static volatile boolean sprayModeEnabled = false;
+    private static volatile boolean initialized = false;
     
-    static {
-        try {
-            System.loadLibrary("hcefhook");
-            isLoaded = true;
-            Log.i(TAG, "Native library with Dobby loaded successfully");
-        } catch (UnsatisfiedLinkError e) {
-            Log.e(TAG, "Failed to load native library: " + e.getMessage());
-            isLoaded = false;
-        }
-    }
+    // Note: Native library is no longer loaded since Frida handles hooks
     
     /**
-     * Check if native library is loaded
+     * Check if the system is ready
+     * With Frida approach, this checks if coordination is set up
      */
     public static boolean isLoaded() {
-        return isLoaded;
+        return true; // Frida-based approach doesn't need native library
     }
     
     /**
-     * Install all Dobby hooks
+     * Initialize hook coordination
      * 
-     * MUST be called from android.nfc process after libnfc-nci.so is loaded.
-     * This is typically done in the Xposed module's initialization.
+     * With Frida, actual hooks are installed externally via frida-server.
+     * This method sets up Java-side state management.
      * 
-     * @return true if hooks were successfully installed
+     * @return true (always succeeds as actual hooking is done by Frida)
      */
     public static boolean install() {
-        if (!isLoaded) {
-            Log.e(TAG, "Cannot install hooks: native library not loaded");
-            return false;
-        }
+        Log.i(TAG, "=== Native Hook Coordination Initialized ===");
+        Log.i(TAG, "Implementation: Frida-based (Dobby removed)");
+        Log.i(TAG, "Process ID: " + android.os.Process.myPid());
+        Log.i(TAG, "");
+        Log.i(TAG, "=== Hook Target Symbols ===");
+        Log.i(TAG, "NFA_SendRawFrame: 0x147100 (_Z16NFA_SendRawFramePhtt)");
+        Log.i(TAG, "nfa_dm_act_send_raw_frame: 0x14e070 (KEY BLOCKING POINT)");
+        Log.i(TAG, "NFC_SendData: 0x183240");
+        Log.i(TAG, "nfa_dm_cb: 0x24c0f8 (state variable)");
+        Log.i(TAG, "");
+        Log.i(TAG, "=== Frida Usage ===");
+        Log.i(TAG, "Script: assets/frida/observe_mode_bypass.js");
+        Log.i(TAG, "Run: frida -U -f com.android.nfc -l observe_mode_bypass.js --no-pause");
+        Log.i(TAG, "");
+        Log.i(TAG, "=== Frida RPC Interface ===");
+        Log.i(TAG, "  sendSensfRes(idmHex, pmmHex)");
+        Log.i(TAG, "  spraySensfRes(idmHex, pmmHex, count, intervalMs)");
+        Log.i(TAG, "  enableBypass() / disableBypass()");
+        Log.i(TAG, "  getState() / getInfo()");
         
-        if (isInitialized) {
-            Log.w(TAG, "Hooks already installed");
-            return true;
-        }
-        
-        try {
-            boolean success = installHooks();
-            isInitialized = success;
-            
-            if (success) {
-                Log.i(TAG, "Dobby hooks installed successfully");
-                Log.i(TAG, "Process: " + android.os.Process.myPid());
-                Log.i(TAG, getStatus());
-            } else {
-                Log.e(TAG, "Failed to install Dobby hooks");
-            }
-            
-            return success;
-        } catch (Exception e) {
-            Log.e(TAG, "Exception during hook installation: " + e.getMessage());
-            e.printStackTrace();
-            return false;
-        }
+        initialized = true;
+        return true;
     }
     
     /**
-     * Check if hooks are installed
+     * Check if hook coordination is set up
      */
     public static boolean isInstalled() {
-        if (!isLoaded) return false;
-        try {
-            return isInstalled0();
-        } catch (Exception e) {
-            return false;
-        }
+        return initialized;
     }
     
     /**
-     * Enable state bypass mode
+     * Enable state bypass mode (Java-side flag)
      * 
-     * When enabled, state checks in nfa_dm_is_data_exchange_allowed() are
-     * bypassed, allowing data transmission in Observe Mode (DISCOVERY state).
+     * Sets a flag for Xposed hooks coordination.
+     * Actual native bypass requires the Frida script.
      */
     public static void enableBypass() {
-        if (isLoaded && isInitialized) {
-            enableBypass0();
-            Log.i(TAG, "State bypass ENABLED");
-        } else {
-            Log.w(TAG, "Cannot enable bypass: hooks not installed");
-        }
+        bypassEnabled = true;
+        Log.i(TAG, "State bypass ENABLED (Java flag)");
+        Log.i(TAG, "For native bypass, ensure Frida script is running in com.android.nfc");
     }
     
     /**
      * Disable state bypass mode
      */
     public static void disableBypass() {
-        if (isLoaded && isInitialized) {
-            disableBypass0();
-            Log.i(TAG, "State bypass DISABLED");
-        }
+        bypassEnabled = false;
+        Log.i(TAG, "State bypass DISABLED");
     }
     
     /**
-     * Enable spray mode for continuous SENSF_REQ response
+     * Enable spray mode coordination
      * 
-     * Spray Strategy: Continuously respond to SENSF_REQ to increase likelihood
-     * of successful collision-free reception by the reader, compensating for
-     * the inability to meet the 2.4ms FeliCa timing constraint in software.
-     * 
-     * When enabled:
-     * - Bypass mode is automatically enabled
-     * - SENSF_RES will be transmitted repeatedly
-     * - Connection stability is improved through probabilistic timing
+     * Sets flags for Java-side coordination.
+     * Actual spray requires:
+     * 1. Frida script: rpc.exports.spraySensfRes(idm, pmm, 100, 3)
+     * 2. Or Java-layer SprayController with IPC
      */
     public static void enableSprayMode() {
-        if (isLoaded && isInitialized) {
-            enableSprayMode0();
-            Log.i(TAG, "SPRAY MODE ENABLED - continuous SENSF_RES transmission");
-        } else {
-            Log.w(TAG, "Cannot enable spray mode: hooks not installed");
-        }
+        sprayModeEnabled = true;
+        bypassEnabled = true;  // Spray requires bypass
+        Log.i(TAG, "SPRAY MODE ENABLED (coordination flags set)");
+        Log.i(TAG, "For actual spray:");
+        Log.i(TAG, "  Frida: rpc.exports.spraySensfRes('1145141919810000', 'FFFFFFFFFFFFFFFF', 100, 3)");
     }
     
     /**
      * Disable spray mode
      */
     public static void disableSprayMode() {
-        if (isLoaded && isInitialized) {
-            disableSprayMode0();
-            Log.i(TAG, "SPRAY MODE DISABLED");
-        }
+        sprayModeEnabled = false;
+        Log.i(TAG, "SPRAY MODE DISABLED");
     }
     
     /**
      * Check if bypass mode is currently enabled
      */
     public static boolean isBypassEnabled() {
-        if (!isLoaded || !isInitialized) return false;
-        try {
-            return isBypassEnabled0();
-        } catch (Exception e) {
-            return false;
-        }
+        return bypassEnabled;
     }
     
     /**
      * Check if spray mode is currently enabled
      */
     public static boolean isSprayModeEnabled() {
-        if (!isLoaded || !isInitialized) return false;
-        try {
-            return isSprayModeEnabled0();
-        } catch (Exception e) {
-            return false;
-        }
+        return sprayModeEnabled;
     }
     
     /**
-     * Get detailed status information about installed hooks
+     * Get detailed status information
      */
     public static String getStatus() {
-        if (!isLoaded) {
-            return "Native library not loaded";
-        }
-        if (!isInitialized) {
-            return "Hooks not installed";
-        }
-        
-        try {
-            return getStatus0();
-        } catch (Exception e) {
-            return "Error getting status: " + e.getMessage();
-        }
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== Native Hook Status ===\n");
+        sb.append("Implementation: Frida-based (Dobby removed)\n");
+        sb.append("Initialized: ").append(initialized ? "YES" : "NO").append("\n");
+        sb.append("Bypass Enabled: ").append(bypassEnabled ? "YES" : "NO").append("\n");
+        sb.append("Spray Mode: ").append(sprayModeEnabled ? "YES" : "NO").append("\n");
+        sb.append("Process ID: ").append(android.os.Process.myPid()).append("\n");
+        sb.append("\n");
+        sb.append("=== Key Hook Targets ===\n");
+        sb.append("NFA_SendRawFrame: 0x147100\n");
+        sb.append("nfa_dm_act_send_raw_frame: 0x14e070 (blocks TX)\n");
+        sb.append("nfa_dm_cb.disc_state: for state spoofing\n");
+        sb.append("\n");
+        sb.append("=== Frida Usage ===\n");
+        sb.append("Script: assets/frida/observe_mode_bypass.js\n");
+        sb.append("Run: frida -U -f com.android.nfc -l observe_mode_bypass.js\n");
+        return sb.toString();
     }
     
     /**
@@ -197,21 +171,12 @@ public class DobbyHooks {
      */
     public static void logStatus() {
         String status = getStatus();
-        Log.i(TAG, "=== Dobby Hook Status ===");
+        Log.i(TAG, "=== Native Hook Status ===");
         for (String line : status.split("\n")) {
-            Log.i(TAG, line);
+            if (!line.isEmpty()) {
+                Log.i(TAG, line);
+            }
         }
         Log.i(TAG, "========================");
     }
-    
-    // Native methods
-    private static native boolean installHooks();
-    private static native void enableBypass0();
-    private static native void disableBypass0();
-    private static native void enableSprayMode0();
-    private static native void disableSprayMode0();
-    private static native boolean isInstalled0();
-    private static native boolean isBypassEnabled0();
-    private static native boolean isSprayModeEnabled0();
-    private static native String getStatus0();
 }
