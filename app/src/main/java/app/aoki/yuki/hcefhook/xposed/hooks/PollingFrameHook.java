@@ -30,6 +30,9 @@ public class PollingFrameHook {
     
     private static final String TAG = "HcefHook.PollingFrame";
     
+    // Installation flag
+    private static volatile boolean installed = false;
+    
     // Callback for SENSF_REQ detection
     private static SensfReqCallback callback;
     
@@ -42,6 +45,13 @@ public class PollingFrameHook {
     
     public static void setCallback(SensfReqCallback cb) {
         callback = cb;
+    }
+    
+    /**
+     * Check if hook is installed
+     */
+    public static boolean isInstalled() {
+        return installed;
     }
     
     /**
@@ -59,6 +69,7 @@ public class PollingFrameHook {
         // This is called when the NFCC sends polling frames in Observe Mode
         try {
             hookPollingLoopHandler(lpparam, broadcaster);
+            installed = true;
         } catch (Throwable t) {
             XposedBridge.log(TAG + ": Failed to hook polling loop: " + t.getMessage());
             broadcaster.error("Polling loop hook failed: " + t.getMessage());

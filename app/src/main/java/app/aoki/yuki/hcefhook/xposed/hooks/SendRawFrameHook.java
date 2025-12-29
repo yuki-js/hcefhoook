@@ -30,6 +30,9 @@ public class SendRawFrameHook {
     
     private static final String TAG = "HcefHook.SendRaw";
     
+    // Installation flag
+    private static volatile boolean installed = false;
+    
     // Context from hooked process
     private static Context hookedContext;
     
@@ -39,6 +42,13 @@ public class SendRawFrameHook {
     
     // Reference to native NFC manager for calling send methods
     private static Object nativeNfcManagerInstance = null;
+    
+    /**
+     * Check if hook is installed
+     */
+    public static boolean isInstalled() {
+        return installed;
+    }
     
     /**
      * Set context obtained from hooked process
@@ -86,6 +96,7 @@ public class SendRawFrameHook {
         // Hook NfcService send methods
         hookNfcServiceSend(lpparam, broadcaster);
         
+        installed = true;
         broadcaster.info("Send raw frame hooks installed");
     }
     

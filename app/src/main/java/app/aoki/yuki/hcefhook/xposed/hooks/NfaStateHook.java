@@ -25,11 +25,21 @@ public class NfaStateHook {
     
     private static final String TAG = "HcefHook.NfaState";
     
+    // Installation flag
+    private static volatile boolean installed = false;
+    
     // Flag to enable/disable state bypass
     private static volatile boolean bypassEnabled = false;
     
     // Original state for restoration
     private static int originalState = -1;
+    
+    /**
+     * Check if hook is installed
+     */
+    public static boolean isInstalled() {
+        return installed;
+    }
     
     /**
      * Enable or disable state bypass
@@ -57,6 +67,7 @@ public class NfaStateHook {
         // Xposed cannot directly hook native functions in libnfc-nci.so
         // The Java hooks provide a fallback for APIs that go through JNI
         
+        installed = true;
         broadcaster.info("NFA state hooks installed (Java layer)");
         broadcaster.warn("Native hooks require Frida - see HOOK_TARGETS.md");
     }

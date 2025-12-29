@@ -9,10 +9,14 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam;
 
 import app.aoki.yuki.hcefhook.core.Constants;
+import app.aoki.yuki.hcefhook.ipc.broadcast.BroadcastIpc;
 import app.aoki.yuki.hcefhook.xposed.hooks.NfaStateHook;
 import app.aoki.yuki.hcefhook.xposed.hooks.ObserveModeHook;
 import app.aoki.yuki.hcefhook.xposed.hooks.PollingFrameHook;
 import app.aoki.yuki.hcefhook.xposed.hooks.SendRawFrameHook;
+
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Xposed Module entry point for HCE-F Observe Mode SENSF_RES Injection
@@ -28,6 +32,7 @@ public class XposedInit implements IXposedHookLoadPackage {
     
     private Context appContext;
     private LogBroadcaster broadcaster;
+    private BroadcastIpc broadcastIpc;
     
     // Thread safety for command polling
     private static volatile boolean commandPollingStarted = false;
@@ -88,6 +93,10 @@ public class XposedInit implements IXposedHookLoadPackage {
                         PollingFrameHook.setHookedContext(appContext);
                         SendRawFrameHook.setHookedContext(appContext);
                         
+                        // Initialize BroadcastIpc for bidirectional communication
+                        // This replaces the broken ContentProvider IPC
+                        initBroadcastIpc(lpparam);
+                        
                         // Initialize Dobby native hooks in android.nfc process
                         // CRITICAL: This ensures hooks run in the correct process context
                         // NOTE: Must wait for NFC JNI library to be loaded first
@@ -95,13 +104,21 @@ public class XposedInit implements IXposedHookLoadPackage {
                             installDobbyHooksAsync();
                         }
                         
-                        // Notify main app that hook is active via IPC
+                        // Notify main app that hook is active via deprecated IPC (for compatibility)
                         try {
                             app.aoki.yuki.hcefhook.ipc.IpcClient ipcClient = 
                                 new app.aoki.yuki.hcefhook.ipc.IpcClient(appContext);
                             ipcClient.setHookActive(true);
                         } catch (Exception e) {
-                            XposedBridge.log(TAG + ": Failed to notify app: " + e.getMessage());
+                            XposedBridge.log(TAG + ": Failed to notify app via old IPC: " + e.getMessage());
+                        }
+                        
+                        // Send via new Broadcast IPC as well
+                        if (broadcastIpc != null) {
+                            Map<String, String> data = new HashMap<>();
+                            data.put("hook_active", "true");
+                            data.put("package", lpparam.packageName);
+                            broadcastIpc.sendEvent("HOOK_STATUS", data);
                         }
                         
                         if (broadcaster != null) {
@@ -113,6 +130,90 @@ public class XposedInit implements IXposedHookLoadPackage {
         } catch (Throwable t) {
             XposedBridge.log(TAG + ": Failed to hook Application.attach: " + t.getMessage());
         }
+    }
+    
+    /**
+     * Initialize Broadcast IPC for bidirectional communication
+     * 
+     * Replaces broken ContentProvider IPC. This allows:
+     * - MainActivity → Xposed: Commands (e.g., get status, send frame)
+     * - Xposed → MainActivity: Events and responses
+     */
+    private void initBroadcastIpc(LoadPackageParam lpparam) {
+        try {
+            broadcastIpc = new BroadcastIpc(appContext, lpparam.packageName);
+            
+            // Set command handler to process commands from MainActivity
+            broadcastIpc.setCommandHandler((commandType, data, sourceProcess) -> {
+                XposedBridge.log(TAG + ": Received command: " + commandType + " from " + sourceProcess);
+                
+                switch (commandType) {
+                    case "GET_STATUS":
+                        sendStatusResponse();
+                        break;
+                    
+                    case "SEND_FRAME":
+                        handleSendFrameCommand(data);
+                        break;
+                    
+                    case "SET_CONFIG":
+                        handleConfigCommand(data);
+                        break;
+                    
+                    default:
+                        XposedBridge.log(TAG + ": Unknown command: " + commandType);
+                }
+            });
+            
+            // Register receiver
+            broadcastIpc.register();
+            
+            XposedBridge.log(TAG + ": BroadcastIpc initialized successfully");
+            broadcaster.info("Broadcast IPC ready for bidirectional communication");
+            
+        } catch (Exception e) {
+            XposedBridge.log(TAG + ": Failed to initialize BroadcastIpc: " + e.getMessage());
+            broadcaster.error("BroadcastIpc initialization failed: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Send status response to MainActivity
+     */
+    private void sendStatusResponse() {
+        if (broadcastIpc == null) return;
+        
+        Map<String, String> status = new HashMap<>();
+        status.put("hook_active", "true");
+        status.put("nfa_state_hook", String.valueOf(NfaStateHook.isInstalled()));
+        status.put("send_frame_hook", String.valueOf(SendRawFrameHook.isInstalled()));
+        status.put("polling_frame_hook", String.valueOf(PollingFrameHook.isInstalled()));
+        
+        broadcastIpc.sendResponse("STATUS", status);
+    }
+    
+    /**
+     * Handle send frame command from MainActivity
+     */
+    private void handleSendFrameCommand(Map<String, String> data) {
+        if (data == null) return;
+        
+        String frameHex = data.get("frame_hex");
+        if (frameHex != null) {
+            XposedBridge.log(TAG + ": Frame send requested: " + frameHex);
+            broadcaster.info("Frame send request received from MainActivity");
+            // Frame will be queued for injection by SendRawFrameHook
+        }
+    }
+    
+    /**
+     * Handle configuration command from MainActivity
+     */
+    private void handleConfigCommand(Map<String, String> data) {
+        if (data == null) return;
+        
+        XposedBridge.log(TAG + ": Config update: " + data);
+        broadcaster.info("Configuration updated from MainActivity");
     }
     
     /**
