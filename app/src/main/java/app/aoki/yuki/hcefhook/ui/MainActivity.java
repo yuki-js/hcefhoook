@@ -28,7 +28,10 @@ import app.aoki.yuki.hcefhook.core.LogReceiver;
 import app.aoki.yuki.hcefhook.core.SensfResBuilder;
 import app.aoki.yuki.hcefhook.ipc.HookIpcProvider;
 import app.aoki.yuki.hcefhook.ipc.IpcClient;
+import app.aoki.yuki.hcefhook.ipc.broadcast.BroadcastIpc;
 import app.aoki.yuki.hcefhook.observemode.ObserveModeManager;
+
+import java.util.HashMap;
 
 /**
  * Main activity for HCE-F Hook PoC
@@ -68,8 +71,11 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
     // Observe Mode Manager (no reflection, clean implementation)
     private ObserveModeManager observeModeManager;
     
-    // IPC Client for communicating with hooks
+    // IPC Client for communicating with hooks (deprecated ContentProvider-based)
     private IpcClient ipcClient;
+    
+    // BroadcastIpc for bidirectional communication (replaces broken ContentProvider)
+    private BroadcastIpc broadcastIpc;
     
     // Log handling
     private LogReceiver logReceiver;
@@ -85,8 +91,11 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         
-        // Initialize IPC client
+        // Initialize IPC client (deprecated ContentProvider-based)
         ipcClient = new IpcClient(this);
+        
+        // Initialize BroadcastIpc for bidirectional communication
+        setupBroadcastIpc();
         
         // Initialize ObserveModeManager (no reflection, clean API)
         observeModeManager = new ObserveModeManager(this);
@@ -103,14 +112,100 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         
         // Now safe to log after views are initialized
         appendLog("INFO", "MainActivity.onCreate() - Starting initialization");
-        appendLog("DEBUG", "IPC client initialized");
+        appendLog("DEBUG", "IPC client initialized (ContentProvider - deprecated)");
+        appendLog("INFO", "BroadcastIpc initialized for bidirectional communication");
         
         updateStatus();
         
         appendLog("INFO", "HCE-F Hook PoC started");
         appendLog("INFO", "Device: " + Build.MODEL + " (Android " + Build.VERSION.RELEASE + ")");
         appendLog("INFO", "Waiting for Xposed hook activation...");
-        appendLog("WARN", "Observe Mode control happens via Xposed hooks in com.android.nfc process");
+        
+        // Request status from Xposed hooks via Broadcast IPC
+        requestHookStatus();
+    }
+    
+    /**
+     * Setup BroadcastIpc for bidirectional communication with Xposed hooks
+     * 
+     * Replaces broken ContentProvider IPC that couldn't receive on com.android.nfc side.
+     */
+    private void setupBroadcastIpc() {
+        broadcastIpc = new BroadcastIpc(this, "app.aoki.yuki.hcefhook");
+        
+        // Set command handler to receive messages from Xposed
+        broadcastIpc.setCommandHandler((commandType, data, sourceProcess) -> {
+            appendLog("IPC", "Received from " + sourceProcess + ": " + commandType);
+            
+            switch (commandType) {
+                case "STATUS":
+                    handleStatusResponse(data);
+                    break;
+                    
+                case "HOOK_STATUS":
+                    handleHookStatusEvent(data);
+                    break;
+                    
+                case "FRAME_SENT":
+                    handleFrameSentEvent(data);
+                    break;
+                    
+                default:
+                    appendLog("IPC", "Unknown message type: " + commandType);
+            }
+        });
+        
+        // Register receiver
+        broadcastIpc.register();
+        appendLog("DEBUG", "BroadcastIpc registered and ready");
+    }
+    
+    /**
+     * Request hook status via BroadcastIpc
+     */
+    private void requestHookStatus() {
+        if (broadcastIpc != null) {
+            broadcastIpc.sendCommand("GET_STATUS", null);
+            appendLog("DEBUG", "Requested hook status via BroadcastIpc");
+        }
+    }
+    
+    /**
+     * Handle status response from Xposed hooks
+     */
+    private void handleStatusResponse(Map<String, String> data) {
+        if (data != null) {
+            String hookActive = data.get("hook_active");
+            String nfaStateHook = data.get("nfa_state_hook");
+            String sendFrameHook = data.get("send_frame_hook");
+            String pollingFrameHook = data.get("polling_frame_hook");
+            
+            appendLog("STATUS", "Hook Active: " + hookActive);
+            appendLog("STATUS", "NFA State Hook: " + nfaStateHook);
+            appendLog("STATUS", "Send Frame Hook: " + sendFrameHook);
+            appendLog("STATUS", "Polling Frame Hook: " + pollingFrameHook);
+        }
+    }
+    
+    /**
+     * Handle hook status event from Xposed
+     */
+    private void handleHookStatusEvent(Map<String, String> data) {
+        if (data != null) {
+            String hookActive = data.get("hook_active");
+            String packageName = data.get("package");
+            appendLog("EVENT", "Hooks activated in: " + packageName);
+        }
+    }
+    
+    /**
+     * Handle frame sent event from Xposed
+     */
+    private void handleFrameSentEvent(Map<String, String> data) {
+        if (data != null) {
+            String result = data.get("result");
+            appendLog("EVENT", "Frame sent result: " + result);
+        }
     }
     
     private void initViews() {
@@ -691,6 +786,9 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         super.onDestroy();
         if (logReceiver != null) {
             unregisterReceiver(logReceiver);
+        }
+        if (broadcastIpc != null) {
+            broadcastIpc.unregister();
         }
         statusHandler.removeCallbacksAndMessages(null);
     }
