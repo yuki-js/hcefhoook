@@ -60,6 +60,7 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
     private Button injectButton;
     private Button clearButton;
     private Button observeModeButton;
+    private Button spray100Button;
     private CheckBox autoInjectCheck;
     private CheckBox bypassCheck;
     private TextView statsText;
@@ -122,6 +123,7 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         injectButton = findViewById(R.id.injectButton);
         clearButton = findViewById(R.id.clearButton);
         observeModeButton = findViewById(R.id.observeModeButton);
+        spray100Button = findViewById(R.id.spray100Button);
         autoInjectCheck = findViewById(R.id.autoInjectCheck);
         bypassCheck = findViewById(R.id.bypassCheck);
         statsText = findViewById(R.id.statsText);
@@ -148,6 +150,11 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         // Observe Mode toggle button
         if (observeModeButton != null) {
             observeModeButton.setOnClickListener(v -> toggleObserveMode());
+        }
+        
+        // Spray 100x button
+        if (spray100Button != null) {
+            spray100Button.setOnClickListener(v -> sprayFrames100x());
         }
         
         // Auto-inject checkbox
@@ -478,6 +485,124 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
             } else {
                 appendLog("ERROR", "✗ Failed to disable Observe Mode");
                 Toast.makeText(this, "Observe Mode Disable FAILED", Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+    
+    /**
+     * Spray SENSF_RES frames 100 times with 3ms intervals
+     * 
+     * This implements the "100回打ち" feature - shooting 100 raw frames
+     * with IDm=114514..., PMm=FFFFFF... to increase the probability
+     * of reader acceptance despite timing constraints.
+     * 
+     * Uses IPC to queue frames and native/Frida hooks for transmission.
+     */
+    private void sprayFrames100x() {
+        appendLog("INFO", "=== SPRAY 100x SENSF_RES ===");
+        appendLog("INFO", "IDm=114514..., PMm=FFFFFF..., interval=3ms");
+        
+        try {
+            String idmHex = idmInput.getText().toString().replace(" ", "").toUpperCase();
+            String pmmHex = pmmInput.getText().toString().replace(" ", "").toUpperCase();
+            
+            byte[] idm = hexToBytes(idmHex);
+            byte[] pmm = hexToBytes(pmmHex);
+            
+            if (idm.length != 8 || pmm.length != 8) {
+                appendLog("ERROR", "IDm and PMm must be exactly 8 bytes each");
+                Toast.makeText(this, "IDm/PMm must be 8 bytes", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            
+            // Build SENSF_RES frame
+            byte[] sensfRes = new SensfResBuilder()
+                .setIdm(idm)
+                .setPmm(pmm)
+                .build();
+            
+            appendLog("INFO", "SENSF_RES: " + SensfResBuilder.toHexString(sensfRes));
+            appendLog("INFO", "Starting 100x spray in background thread...");
+            
+            // Disable button during spray
+            if (spray100Button != null) {
+                spray100Button.setEnabled(false);
+                spray100Button.setText("⏳ Spraying...");
+            }
+            
+            Toast.makeText(this, "Starting 100x spray...", Toast.LENGTH_SHORT).show();
+            
+            // Run spray in background thread
+            new Thread(() -> {
+                int successCount = 0;
+                int failCount = 0;
+                long startTime = System.currentTimeMillis();
+                
+                for (int i = 0; i < 100; i++) {
+                    try {
+                        // Queue injection via IPC
+                        boolean success = ipcClient.queueInjection(sensfRes);
+                        
+                        if (success) {
+                            successCount++;
+                        } else {
+                            failCount++;
+                        }
+                        
+                        // Log progress every 10 frames
+                        if ((i + 1) % 10 == 0) {
+                            final int count = i + 1;
+                            final int sc = successCount;
+                            final int fc = failCount;
+                            runOnUiThread(() -> {
+                                appendLog("SPRAY", "Progress: " + count + "/100 (success=" + sc + ", fail=" + fc + ")");
+                            });
+                        }
+                        
+                        // Sleep 3ms between frames
+                        if (i < 99) {
+                            Thread.sleep(3);
+                        }
+                        
+                    } catch (Exception e) {
+                        failCount++;
+                    }
+                }
+                
+                long elapsed = System.currentTimeMillis() - startTime;
+                final int finalSuccess = successCount;
+                final int finalFail = failCount;
+                final long finalElapsed = elapsed;
+                
+                runOnUiThread(() -> {
+                    appendLog("INFO", "=== SPRAY COMPLETE ===");
+                    appendLog("INFO", "Total time: " + finalElapsed + "ms");
+                    appendLog("INFO", "Success: " + finalSuccess + ", Fail: " + finalFail);
+                    
+                    // Re-enable button
+                    if (spray100Button != null) {
+                        spray100Button.setEnabled(true);
+                        spray100Button.setText("🔥 Spray 100x SENSF_RES (3ms interval)");
+                    }
+                    
+                    Toast.makeText(MainActivity.this, 
+                        "Spray complete: " + finalSuccess + "/100 succeeded", 
+                        Toast.LENGTH_LONG).show();
+                    
+                    // Update stats
+                    updateStatus();
+                });
+                
+            }).start();
+            
+        } catch (Exception e) {
+            appendLog("ERROR", "Spray failed: " + e.getMessage());
+            Toast.makeText(this, "Spray failed: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+            
+            // Re-enable button on error
+            if (spray100Button != null) {
+                spray100Button.setEnabled(true);
+                spray100Button.setText("🔥 Spray 100x SENSF_RES (3ms interval)");
             }
         }
     }

@@ -156,10 +156,20 @@
         android:id="@+id/observeModeButton"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="12dp"
+        android:layout_marginBottom="8dp"
         android:text="Enable Observe Mode"
         android:textSize="12sp"
         android:backgroundTint="#FF6B35" />
+
+    <!-- Spray 100x Button -->
+    <Button
+        android:id="@+id/spray100Button"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp"
+        android:text="🔥 Spray 100x SENSF_RES (3ms interval)"
+        android:textSize="12sp"
+        android:backgroundTint="#E91E63" />
 
     <!-- Log Output -->
     <TextView
