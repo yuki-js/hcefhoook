@@ -271,21 +271,22 @@ public class XposedInit implements IXposedHookLoadPackage {
                 
                 try {
                     // Check if any of the NFC libraries are loaded
-                    java.io.BufferedReader reader = new java.io.BufferedReader(
-                        new java.io.FileReader("/proc/self/maps"));
-                    String line;
-                    
-                    while ((line = reader.readLine()) != null) {
-                        for (String libName : libraryNames) {
-                            if (line.contains(libName)) {
-                                libraryFound = true;
-                                XposedBridge.log(TAG + ": Found NFC library: " + libName + " (attempt " + attempts + ")");
-                                break;
+                    // Use try-with-resources to ensure reader is closed
+                    try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                            new java.io.FileReader("/proc/self/maps"))) {
+                        String line;
+                        
+                        while ((line = reader.readLine()) != null) {
+                            for (String libName : libraryNames) {
+                                if (line.contains(libName)) {
+                                    libraryFound = true;
+                                    XposedBridge.log(TAG + ": Found NFC library: " + libName + " (attempt " + attempts + ")");
+                                    break;
+                                }
                             }
+                            if (libraryFound) break;
                         }
-                        if (libraryFound) break;
-                    }
-                    reader.close();
+                    } // reader auto-closed here
                     
                     if (!libraryFound) {
                         XposedBridge.log(TAG + ": NFC library not loaded yet, waiting " + currentDelay + "ms (attempt " + attempts + "/" + MAX_ATTEMPTS + ")");
