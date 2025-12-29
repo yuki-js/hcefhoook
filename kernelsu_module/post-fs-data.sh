@@ -7,16 +7,16 @@
 #
 # Requirements: KernelSU with root access
 
-MODDIR="${0%/*}"
+MODDIR="/data/adb/modules/hcefhook"
 LOGFILE="/data/local/tmp/hcefhook_ksu.log"
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOGFILE"
-    echo "[HCE-F Hook KSU] $*"
 }
 
 
 log "=== HCE-F Hook KernelSU Module Starting ==="
+mkdir -p "/data/adb/modules/hcefhook/system/vendor/etc"
 log "Module directory: $MODDIR"
 log "User ID: $(id -u)"
 
@@ -33,9 +33,9 @@ override_key() {
     local KEY="$2"
     local NEW_VALUE="$3"
 
-    if grep -qE "^\s*$KEY\s*=" "$FILE"; then
+    if grep -qE '^\\s*$KEY\\s*=' "$FILE"; then
         log "Overriding $KEY in $FILE to $NEW_VALUE"
-        sed -i -E "s|^\s*($KEY\s*=).*|\1 $NEW_VALUE|g" "$FILE"
+        sed -i -E 's|^\\s*($KEY\\s*=).*|\\1 $NEW_VALUE|g' "$FILE"
     else
         log "Adding $KEY to $FILE with value $NEW_VALUE"
         echo "$KEY = $NEW_VALUE" >> "$FILE"
@@ -52,8 +52,8 @@ execute_replace_nci() {
     local MAGISK_REPLACE="$MODDIR/system/vendor/etc/$BASENAME"
 
     if [ -f "$MAGISK_REPLACE" ]; then
-        log "Deleting previous $TARGET_FILE"
-        rm -f "$TARGET_FILE"
+        log "Deleting previous $MAGISK_REPLACE"
+        rm -f "$MAGISK_REPLACE"
     fi
     cp "$TARGET_FILE" "$MAGISK_REPLACE"
 
@@ -85,8 +85,8 @@ execute_replace_halst() {
     local MAGISK_REPLACE="$MODDIR/system/vendor/etc/$BASENAME"
 
     if [ -f "$MAGISK_REPLACE" ]; then
-        log "Deleting previous $TARGET_FILE"
-        rm -f "$TARGET_FILE"
+        log "Deleting previous $MAGISK_REPLACE"
+        rm -f "$MAGISK_REPLACE"
     fi
     cp "$TARGET_FILE" "$MAGISK_REPLACE"
 
@@ -110,3 +110,18 @@ if [ -f "$VENDOR_HALST_P_CONF" ]; then
 else
     log "No HAL-ST FeliCa-specific config found (this is normal for most devices)"
 fi
+
+OVERLAY_DIR="$MODDIR/system/vendor/etc"
+# Set correct permissions for overlay files
+if [ -d "$OVERLAY_DIR" ]; then
+    chmod 755 "$OVERLAY_DIR"
+    chmod 644 "$OVERLAY_DIR"/*.conf 2>/dev/null
+    chown root:root "$OVERLAY_DIR"/*.conf 2>/dev/null
+    log "Permissions set for overlay files"
+fi
+
+# Grant root access to com.android.nfc process (for hooks to work)
+# This will be done via service.sh when NFC service starts
+
+log "=== HCE-F Hook KernelSU Module Complete ==="
+log "Overlay directory: $OVERLAY_DIR"
