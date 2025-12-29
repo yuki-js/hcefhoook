@@ -421,23 +421,31 @@ function installHooks() {
 // ============================================================================
 
 function buildSensfRes(idm, pmm) {
-    // SENSF_RES: [Length][0x01][IDm 8B][PMm 8B]
-    // Total: 1 + 1 + 8 + 8 = 18 bytes
-    const buf = Memory.alloc(18);
+    // SENSF_RES format (FeliCa/NFC-F):
+    // [Length(1B)][Response Code(1B)][IDm(8B)][PMm(8B)][RD(0 or 2B)]
+    // 
+    // Length field = number of bytes following (NOT including Length itself)
+    // Without RD: Length = 1 + 8 + 8 = 17 bytes
+    // With RD:    Length = 1 + 8 + 8 + 2 = 19 bytes
+    //
+    // Total packet size: 1 (Length) + 17 = 18 bytes (without RD)
+    const SENSF_RES_LEN = 17; // Response Code + IDm + PMm (no RD)
+    const TOTAL_SIZE = 1 + SENSF_RES_LEN; // Length field + payload = 18 bytes
+    const buf = Memory.alloc(TOTAL_SIZE);
     let offset = 0;
     
-    // Length (including length byte)
-    buf.add(offset++).writeU8(18);
+    // Length field (NOT including itself, just the payload)
+    buf.add(offset++).writeU8(SENSF_RES_LEN);
     
-    // Response code
+    // Response code (0x01 for SENSF_RES)
     buf.add(offset++).writeU8(0x01);
     
-    // IDm (8 bytes)
+    // IDm (8 bytes) - Manufacture code + Card ID
     for (let i = 0; i < 8; i++) {
         buf.add(offset++).writeU8(idm[i] || 0);
     }
     
-    // PMm (8 bytes)
+    // PMm (8 bytes) - IC code + Max response time
     for (let i = 0; i < 8; i++) {
         buf.add(offset++).writeU8(pmm[i] || 0xFF);
     }

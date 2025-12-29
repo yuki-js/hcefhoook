@@ -517,9 +517,13 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         appendLog("DEBUG", "PMm: " + pmmHex);
         
         // Build SENSF_RES packet: [Length][0x01][IDm 8B][PMm 8B]
-        byte[] sensfRes = new byte[18];
-        sensfRes[0] = 18; // Length
-        sensfRes[1] = 0x01; // Response code
+        // Build SENSF_RES packet: [Length][Response Code(0x01)][IDm 8B][PMm 8B]
+        // Length field = payload length (NOT including Length field itself)
+        // Payload = Response Code(1) + IDm(8) + PMm(8) = 17 bytes
+        final int SENSF_RES_PAYLOAD_LEN = 17;
+        byte[] sensfRes = new byte[1 + SENSF_RES_PAYLOAD_LEN]; // 18 bytes total
+        sensfRes[0] = SENSF_RES_PAYLOAD_LEN; // Length = 17 (not 18!)
+        sensfRes[1] = 0x01; // Response code for SENSF_RES
         System.arraycopy(idm, 0, sensfRes, 2, 8);
         System.arraycopy(pmm, 0, sensfRes, 10, 8);
         
