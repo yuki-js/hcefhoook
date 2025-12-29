@@ -79,6 +79,52 @@ static nfa_dm_is_data_exchange_allowed_t g_orig_nfa_dm_is_data_exchange_allowed 
 #define NFA_DM_CB_DISC_CB_OFFSET    0x00  // disc_cb is typically at start
 #define DISC_CB_DISC_STATE_OFFSET   0x28  // disc_state offset within disc_cb
 
+// ============================================================================
+// Memory Safety Utilities
+// ============================================================================
+
+/**
+ * Check if a memory region is readable by checking /proc/self/maps
+ * This prevents SIGSEGV when attempting to read invalid pointers
+ */
+static bool is_memory_readable(void* ptr, size_t size) {
+    if (!ptr || size == 0) {
+        return false;
+    }
+    
+    uintptr_t start_addr = (uintptr_t)ptr;
+    uintptr_t end_addr = start_addr + size;
+    
+    FILE* fp = fopen("/proc/self/maps", "r");
+    if (!fp) {
+        LOGE("Failed to open /proc/self/maps");
+        return false;
+    }
+    
+    char line[1024];
+    bool is_readable = false;
+    
+    while (fgets(line, sizeof(line), fp)) {
+        uintptr_t region_start, region_end;
+        char perms[5];
+        
+        // Parse: address-range perms offset dev inode pathname
+        if (sscanf(line, "%lx-%lx %4s", &region_start, &region_end, perms) >= 3) {
+            // Check if our memory range falls within this region
+            if (start_addr >= region_start && end_addr <= region_end) {
+                // Check if region has read permission
+                if (perms[0] == 'r') {
+                    is_readable = true;
+                    break;
+                }
+            }
+        }
+    }
+    
+    fclose(fp);
+    return is_readable;
+}
+
 /**
  * Get current NFA discovery state from nfa_dm_cb
  */
@@ -91,6 +137,13 @@ static uint8_t get_nfa_discovery_state() {
     uint8_t* disc_state_ptr = (uint8_t*)((uintptr_t)g_nfa_dm_cb + 
                                          NFA_DM_CB_DISC_CB_OFFSET +
                                          DISC_CB_DISC_STATE_OFFSET);
+    
+    // Validate memory before dereferencing to prevent SIGSEGV
+    if (!is_memory_readable(disc_state_ptr, sizeof(uint8_t))) {
+        LOGE("nfa_dm_cb disc_state pointer is not readable: %p", disc_state_ptr);
+        return 0xFF;
+    }
+    
     uint8_t state = *disc_state_ptr;
     
     const char* state_name = "UNKNOWN";
@@ -121,6 +174,13 @@ static bool set_nfa_discovery_state(uint8_t new_state) {
     uint8_t* disc_state_ptr = (uint8_t*)((uintptr_t)g_nfa_dm_cb + 
                                          NFA_DM_CB_DISC_CB_OFFSET +
                                          DISC_CB_DISC_STATE_OFFSET);
+    
+    // Validate memory is readable/writable before accessing to prevent SIGSEGV
+    if (!is_memory_readable(disc_state_ptr, sizeof(uint8_t))) {
+        LOGE("Cannot set state: disc_state pointer is not accessible: %p", disc_state_ptr);
+        pthread_mutex_unlock(&g_state_mutex);
+        return false;
+    }
     
     uint8_t old_state = *disc_state_ptr;
     *disc_state_ptr = new_state;
@@ -247,25 +307,33 @@ Java_app_aoki_yuki_hcefhook_nativehook_DobbyHooks_installHooks(JNIEnv *env, jcla
     
     if (g_nfa_dm_cb) {
         LOGI("✓✓✓ CRITICAL: nfa_dm_cb found at %p", g_nfa_dm_cb);
-        LOGI("✓ State bypass strategy is VIABLE");
         
-        // Dump first 64 bytes for verification (with bounds check)
-        uint8_t* cb_bytes = (uint8_t*)g_nfa_dm_cb;
-        // Note: We can't validate the size without additional information,
-        // but we log this for debugging. In production, use mprotect or /proc/self/maps
-        // to verify memory accessibility before dereferencing.
-        LOGI("nfa_dm_cb dump (first 64 bytes - ensure memory is valid):");
-        for (int i = 0; i < 64; i += 16) {
-            LOGI("  +0x%02x: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
-                 i, cb_bytes[i], cb_bytes[i+1], cb_bytes[i+2], cb_bytes[i+3],
-                 cb_bytes[i+4], cb_bytes[i+5], cb_bytes[i+6], cb_bytes[i+7],
-                 cb_bytes[i+8], cb_bytes[i+9], cb_bytes[i+10], cb_bytes[i+11],
-                 cb_bytes[i+12], cb_bytes[i+13], cb_bytes[i+14], cb_bytes[i+15]);
+        // Validate memory before attempting to dump
+        if (is_memory_readable(g_nfa_dm_cb, 64)) {
+            LOGI("✓ State bypass strategy is VIABLE");
+            LOGI("✓ Memory region verified as readable");
+            
+            // Dump first 64 bytes for verification (memory validated)
+            uint8_t* cb_bytes = (uint8_t*)g_nfa_dm_cb;
+            LOGI("nfa_dm_cb dump (first 64 bytes):");
+            for (int i = 0; i < 64; i += 16) {
+                LOGI("  +0x%02x: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
+                     i, cb_bytes[i], cb_bytes[i+1], cb_bytes[i+2], cb_bytes[i+3],
+                     cb_bytes[i+4], cb_bytes[i+5], cb_bytes[i+6], cb_bytes[i+7],
+                     cb_bytes[i+8], cb_bytes[i+9], cb_bytes[i+10], cb_bytes[i+11],
+                     cb_bytes[i+12], cb_bytes[i+13], cb_bytes[i+14], cb_bytes[i+15]);
+            }
+            
+            // Display current state
+            uint8_t current_state = get_nfa_discovery_state();
+            LOGI("Current discovery state: 0x%02x", current_state);
+        } else {
+            LOGE("✗ CRITICAL: nfa_dm_cb pointer is not readable!");
+            LOGE("DobbySymbolResolver returned invalid address: %p", g_nfa_dm_cb);
+            LOGE("State bypass will NOT be available");
+            // Invalidate the pointer to prevent future crashes
+            g_nfa_dm_cb = nullptr;
         }
-        
-        // Display current state
-        uint8_t current_state = get_nfa_discovery_state();
-        LOGI("Current discovery state: 0x%02x", current_state);
         
     } else {
         LOGE("✗ CRITICAL: nfa_dm_cb not found!");
