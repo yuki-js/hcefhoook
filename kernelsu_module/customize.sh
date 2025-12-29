@@ -143,24 +143,20 @@ execute_replace_halst "$VENDOR_HALST_P_CONF"
 PUBLIC_LIBS="/system/system_ext/etc/public.libraries.txt"
 OVERLAY_PUBLIC_LIBS="$MODPATH/system/system_ext/etc/public.libraries.txt"
 
-if [ -f "$PUBLIC_LIBS" ]; then
-    cp "$PUBLIC_LIBS" "$OVERLAY_PUBLIC_LIBS"
-    
-    # Add NFC JNI libraries if not present
-    if ! grep -q "libstnfc_nci_jni.so" "$OVERLAY_PUBLIC_LIBS" 2>/dev/null; then
-        echo "libstnfc_nci_jni.so 64" >> "$OVERLAY_PUBLIC_LIBS"
-        log_install "Added libstnfc_nci_jni.so to public.libraries.txt"
-    fi
-    
-    if ! grep -q "libstnfc-nci.so" "$OVERLAY_PUBLIC_LIBS" 2>/dev/null; then
-        echo "libstnfc-nci.so 64" >> "$OVERLAY_PUBLIC_LIBS"
-        log_install "Added libstnfc-nci.so to public.libraries.txt"
-    fi
-    
-    chmod 644 "$OVERLAY_PUBLIC_LIBS"
-else
-    log_install "WARNING: $PUBLIC_LIBS not found"
+cp "$PUBLIC_LIBS" "$OVERLAY_PUBLIC_LIBS"
+
+# Add NFC JNI libraries if not present
+if ! grep -q "libstnfc_nci_jni.so" "$OVERLAY_PUBLIC_LIBS" 2>/dev/null; then
+    echo "libstnfc_nci_jni.so 64" >> "$OVERLAY_PUBLIC_LIBS"
+    log_install "Added libstnfc_nci_jni.so to public.libraries.txt"
 fi
+
+if ! grep -q "libstnfc-nci.so" "$OVERLAY_PUBLIC_LIBS" 2>/dev/null; then
+    echo "libstnfc-nci.so 64" >> "$OVERLAY_PUBLIC_LIBS"
+    log_install "Added libstnfc-nci.so to public.libraries.txt"
+fi
+
+chmod 644 "$OVERLAY_PUBLIC_LIBS"
 
 log_install "=== Installation Complete ==="
 log_install "Logs saved to: $LOGFILE"
