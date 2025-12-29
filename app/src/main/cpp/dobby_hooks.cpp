@@ -103,11 +103,12 @@ static bool make_memory_writable(void* ptr, size_t size) {
     
     // Check for overflow in aligned_size calculation
     size_t offset = addr - aligned_addr;
-    if (offset > SIZE_MAX - size || (offset + size) > SIZE_MAX - page_size + 1) {
+    if (offset > SIZE_MAX - size || (offset + size) > SIZE_MAX - page_size) {
         LOGE("Aligned size calculation would overflow");
         return false;
     }
     
+    // Use bit operations for efficiency (page_size is power of 2)
     size_t aligned_size = ((offset + size + page_size - 1) / page_size) * page_size;
     
     LOGI("Attempting to make memory writable:");
@@ -123,7 +124,7 @@ static bool make_memory_writable(void* ptr, size_t size) {
         return true;
     } else {
         LOGE("✗ mprotect failed: %s (errno: %d)", strerror(errno), errno);
-        LOGE("This may require root/CAP_SYS_RAWIO capability");
+        LOGE("This may require root privileges or appropriate capabilities");
         return false;
     }
 }
@@ -169,8 +170,8 @@ static bool is_memory_accessible(void* ptr, size_t size, bool require_write) {
         // Parse: address-range perms offset dev inode pathname
         // Use safer format specifier to prevent buffer overflow
         if (sscanf(line, "%lx-%lx %4[rwxps-]", &region_start, &region_end, perms) >= 3) {
-            // Check if our memory range falls within this region
-            // Both ranges use exclusive upper bound: [start, end)
+            // Check if our memory range [start_addr, end_addr) falls within region [region_start, region_end)
+            // Since both use exclusive upper bounds, end_addr can equal region_end
             if (start_addr >= region_start && end_addr <= region_end) {
                 // Check if region has required permissions
                 bool has_read = (perms[0] == 'r');
