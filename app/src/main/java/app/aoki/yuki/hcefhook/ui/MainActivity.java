@@ -90,12 +90,6 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         
-        // Initialize IPC client (deprecated ContentProvider-based)
-        ipcClient = new IpcClient(this);
-        
-        // Initialize BroadcastIpc for bidirectional communication
-        setupBroadcastIpc();
-        
         // Initialize ObserveModeManager (no reflection, clean API)
         observeModeManager = new ObserveModeManager(this);
         
@@ -108,6 +102,12 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         setupLogReceiver();
         setupStatusUpdater();
         loadSavedConfig();
+        
+        // Initialize IPC AFTER views (appendLog requires logText to be initialized)
+        ipcClient = new IpcClient(this);
+        
+        // Initialize BroadcastIpc for bidirectional communication
+        setupBroadcastIpc();
         
         // Now safe to log after views are initialized
         appendLog("INFO", "MainActivity.onCreate() - Starting initialization");
