@@ -4,59 +4,36 @@
 
 This document provides a detailed reference of functions and memory addresses to hook for bypassing Observe Mode TX restrictions.
 
+> **IMPORTANT UPDATE (2024-12-29)**: This document has been corrected based on actual binary analysis of `libnfc_nci_jni.so`. Several function names in previous versions were incorrect.
+
 ## 1. Primary Hook Targets
 
-### 1.1 nfa_dm_is_data_exchange_allowed()
+### ⚠️ CORRECTED: Function Names
 
-**Purpose**: State validation gate for data exchange operations
+**Previous documentation listed incorrect function names. The correct targets are:**
 
-**Location**:
-- Library: `libnfc-nci.so`
-- Source: `system/nfc/src/nfa/dm/nfa_dm_discover.cc`
-
-**Symbol Names** (may vary by build):
-```
-C++ mangled:   _ZN3nfa2dm26is_data_exchange_allowedEv
-Alternative:   _Z30nfa_dm_is_data_exchange_allowedv
-Demangled:     nfa::dm::is_data_exchange_allowed()
-```
-
-**Signature**:
-```cpp
-bool nfa_dm_is_data_exchange_allowed(void);
-```
-
-**Hook Strategy**:
-```javascript
-// Frida hook - force return true
-Interceptor.replace(target, new NativeCallback(function() {
-    return 1; // true
-}, 'bool', []));
-```
-
-**Dobby Hook (C++)**:
-```cpp
-bool (*orig_is_data_exchange_allowed)(void);
-bool hooked_is_data_exchange_allowed(void) {
-    return true; // Bypass state check
-}
-// DobbyHook(target_addr, (void*)hooked_is_data_exchange_allowed, (void**)&orig_is_data_exchange_allowed);
-```
+| Incorrect (Do NOT Use) | Correct |
+|------------------------|---------|
+| ~~`nfa_dm_is_data_exchange_allowed`~~ | Does not exist |
+| ~~`nci_snd_data`~~ | `NFC_SendData` |
+| ~~`_ZN3nfa2dm26is_data_exchange_allowedEv`~~ | Not found |
 
 ---
 
-### 1.2 NFA_SendRawFrame()
+### 1.1 NFA_SendRawFrame() ✓ VERIFIED
 
 **Purpose**: Public API for sending raw NFC frames
 
 **Location**:
-- Library: `libnfc-nci.so`
+- Library: `libnfc_nci_jni.so` (or `libnfc-nci.so`)
 - Source: `system/nfc/src/nfa/dm/nfa_dm_api.cc`
 
-**Symbol Name**:
+**Symbol Name (C++ mangled)**:
 ```
-NFA_SendRawFrame (C linkage, not mangled)
+_Z16NFA_SendRawFramePhtt
 ```
+
+**Address (libnfc_nci_jni.so)**: `0x147100`
 
 **Signature**:
 ```cpp
@@ -67,317 +44,316 @@ tNFA_STATUS NFA_SendRawFrame(uint8_t* p_raw_data,
 
 **Return Values**:
 - `NFA_STATUS_OK (0x00)` - Success
-- `NFA_STATUS_WRONG_DISCOVERY_STATE (0x0A)` - Blocked by state
+- `NFA_STATUS_FAILED (0x01)` - Blocked by state
 
 **Hook Strategy**:
 ```javascript
-// Monitor and potentially bypass state check inside
-Interceptor.attach(target, {
+// Frida hook
+const NFA_SendRawFrame = Module.findExportByName("libnfc_nci_jni.so", "_Z16NFA_SendRawFramePhtt");
+Interceptor.attach(NFA_SendRawFrame, {
     onEnter: function(args) {
         this.data = args[0];
         this.len = args[1].toInt32();
-        console.log("SendRawFrame: " + hexdump(this.data, {length: this.len}));
+        console.log("SendRawFrame: len=" + this.len);
     },
     onLeave: function(retval) {
-        if (retval.toInt32() === 0x0A) {
-            console.log("Blocked by state - attempting bypass...");
-            // Alternative: call internal function directly
-        }
+        console.log("SendRawFrame result: " + retval);
     }
 });
 ```
 
 ---
 
-### 1.3 nci_snd_data()
+### 1.2 nfa_dm_act_send_raw_frame() ✓ VERIFIED - KEY BLOCKING POINT
 
-**Purpose**: NCI layer data transmission
+**Purpose**: Internal action function with state validation
 
 **Location**:
-- Library: `libnfc-nci.so`
-- Source: `system/nfc/src/nfc/nci/nci_hmsgs.cc`
+- Library: `libnfc_nci_jni.so`
+- Source: `system/nfc/src/nfa/dm/nfa_dm_act.cc:1098`
 
-**Symbol Names**:
+**Symbol Name (C++ mangled)**:
 ```
-C++ mangled:   _Z12nci_snd_datahP6BT_HDR
-Alternative:   _ZN3nci8snd_dataEhP6BT_HDR
+_Z25nfa_dm_act_send_raw_frameP12tNFA_DM_MSG
 ```
+
+**Address (libnfc_nci_jni.so)**: `0x14e070`
 
 **Signature**:
 ```cpp
-tNCI_STATUS nci_snd_data(uint8_t conn_id, BT_HDR* p_buf);
+bool nfa_dm_act_send_raw_frame(tNFA_DM_MSG* p_data);
+```
+
+**Blocking Logic (nfa_dm_act.cc:1104-1105)**:
+```cpp
+// This is the ACTUAL state check that blocks TX in Observe Mode
+if ((nfa_dm_cb.disc_cb.disc_state == NFA_DM_RFST_POLL_ACTIVE) ||
+    (nfa_dm_cb.disc_cb.disc_state == NFA_DM_RFST_LISTEN_ACTIVE)) {
+    // TX allowed
+} else {
+    // TX blocked - returns NFC_STATUS_FAILED
+}
+```
+
+**Hook Strategy (State Spoofing)**:
+```javascript
+const nfa_dm_cb = Module.findExportByName("libnfc_nci_jni.so", "nfa_dm_cb");
+const DISC_STATE_OFFSET = 0x04; // Verify at runtime!
+const NFA_DM_RFST_LISTEN_ACTIVE = 5;
+
+Interceptor.attach(ptr("0x14e070"), {
+    onEnter: function(args) {
+        // Spoof state before check
+        const statePtr = nfa_dm_cb.add(DISC_STATE_OFFSET);
+        this.savedState = statePtr.readU8();
+        statePtr.writeU8(NFA_DM_RFST_LISTEN_ACTIVE);
+    },
+    onLeave: function(retval) {
+        // Restore state
+        const statePtr = nfa_dm_cb.add(DISC_STATE_OFFSET);
+        statePtr.writeU8(this.savedState);
+    }
+});
+```
+
+---
+
+### 1.3 NFC_SendData() ✓ VERIFIED
+
+**Purpose**: Lower-level data send
+
+**Location**:
+- Library: `libnfc_nci_jni.so`
+- Source: `system/nfc/src/nfc/nfc/nfc_main.cc`
+
+**Symbol Name (C++ mangled)**:
+```
+_Z12NFC_SendDatahP7NFC_HDR
+```
+
+**Address (libnfc_nci_jni.so)**: `0x183240`
+
+**Signature**:
+```cpp
+tNFC_STATUS NFC_SendData(uint8_t conn_id, NFC_HDR* p_buf);
 ```
 
 **Key Parameters**:
-- `conn_id`: 0x00 for static RF connection
+- `conn_id`: `0x00` (NFC_RF_CONN_ID) for RF connection
 - `p_buf`: NFC buffer structure
 
-**BT_HDR Structure**:
-```cpp
-typedef struct {
-    uint16_t event;     // Event type
-    uint16_t len;       // Data length
-    uint16_t offset;    // Offset to data
-    uint16_t layer_specific;
-    // Followed by data bytes
-} BT_HDR;
+---
+
+### 1.4 ce_t3t_send_to_lower() ✓ VERIFIED - T3T SPECIFIC
+
+**Purpose**: Type 3 Tag (FeliCa) specific send function
+
+**Location**:
+- Library: `libnfc_nci_jni.so`
+- Source: `system/nfc/src/nfc/tags/ce_t3t.cc`
+
+**Symbol Name (C++ mangled)**:
+```
+_Z20ce_t3t_send_to_lowerP7NFC_HDR
 ```
 
-**Hook Strategy**:
-```javascript
-// Bypass connection ID validation
-Interceptor.attach(target, {
-    onEnter: function(args) {
-        // Force conn_id to static RF connection
-        args[0] = ptr(0x00);
-    }
-});
+**Address (libnfc_nci_jni.so)**: `0x18bdc0`
+
+**Signature**:
+```cpp
+tNFC_STATUS ce_t3t_send_to_lower(NFC_HDR* p_buf);
 ```
 
 ---
 
-### 1.4 nfc_ncif_send_data()
+### 1.5 nfc_ncif_send_data() ✓ VERIFIED
 
-**Purpose**: Lower-level data send to HAL
+**Purpose**: NCI frame construction and send
 
-**Location**:
-- Library: `libnfc-nci.so`
-- Source: `system/nfc/src/nfc/nci/nci_hmsgs.cc`
+**Address (libnfc_nci_jni.so)**: `0x184870`
 
-**Symbol Names**:
+**Symbol Name**:
 ```
-C++ mangled:   _ZN3nfc5ncif9send_dataEP6BT_HDRh
-Alternative:   _Z18nfc_ncif_send_dataP6BT_HDRh
+_Z18nfc_ncif_send_dataP12tNFC_CONN_CBP7NFC_HDR
 ```
 
 **Signature**:
 ```cpp
-void nfc_ncif_send_data(BT_HDR* p_buf, uint8_t conn_id);
+tNFC_STATUS nfc_ncif_send_data(tNFC_CONN_CB* p_cb, NFC_HDR* p_data);
 ```
-
-**Hook Usage**: Direct call to bypass upper-level checks
 
 ---
 
 ## 2. Global Variable Targets
 
-### 2.1 nfa_dm_cb
+### 2.1 nfa_dm_cb ✓ VERIFIED
 
 **Purpose**: Main NFA Device Manager control block
 
-**Structure Offset Map**:
+**Symbol**: `nfa_dm_cb`
+**Address (libnfc_nci_jni.so)**: `0x24c0f8`
+**Size**: 1160 bytes
+
+**Structure (tNFA_DM_CB from nfa_dm_int.h)**:
+```cpp
+typedef struct {
+    uint32_t flags;                    // offset 0x00
+    tNFA_DM_CBACK* p_dm_cback;         // offset 0x04/0x08
+    TIMER_LIST_ENT tle;                // timer entry
+    tNFA_CONN_CBACK* p_conn_cback;
+    tNFA_TECHNOLOGY_MASK poll_mask;
+    // ... more fields ...
+    tNFA_DM_DISC_CB disc_cb;           // Discovery control block
+    // ... more fields ...
+} tNFA_DM_CB;
 ```
-Offset  Field                      Type      Description
-------  -------------------------  --------  ----------------------
-0x00    flags                      uint32_t  DM flags
-0x04    disc_cb                    struct    Discovery control block
-  +0x00   disc_cb.disc_state       uint8_t   Discovery state ★KEY
-  +0x01   disc_cb.disc_flags       uint8_t   Discovery flags
-  +0x02   disc_cb.listen_tech_mask uint16_t  Listen technologies
-  ...
+
+**Discovery Control Block (tNFA_DM_DISC_CB)**:
+```cpp
+typedef struct {
+    uint16_t disc_duration;                    // offset 0x00
+    tNFA_DM_DISC_FLAGS disc_flags;             // offset 0x02
+    tNFA_DM_RF_DISC_STATE disc_state;          // offset 0x04 ★KEY
+    tNFC_RF_TECH_N_MODE activated_tech_mode;   // offset 0x05
+    // ... more fields ...
+} tNFA_DM_DISC_CB;
 ```
 
 **Discovery State Values**:
 ```cpp
-#define NFA_DM_RFST_IDLE              0x00
-#define NFA_DM_RFST_DISCOVERY         0x01  // ← Current in Observe Mode
-#define NFA_DM_RFST_W4_ALL_DISC       0x02
-#define NFA_DM_RFST_W4_HOST_SELECT    0x03
-#define NFA_DM_RFST_POLL_ACTIVE       0x04
-#define NFA_DM_RFST_LISTEN_ACTIVE     0x05  // ← Required for TX
-#define NFA_DM_RFST_LISTEN_SLEEP      0x06
+enum {
+    NFA_DM_RFST_IDLE              = 0,  // idle state
+    NFA_DM_RFST_DISCOVERY         = 1,  // ← Current in Observe Mode
+    NFA_DM_RFST_W4_ALL_DISCOVERIES= 2,
+    NFA_DM_RFST_W4_HOST_SELECT    = 3,
+    NFA_DM_RFST_POLL_ACTIVE       = 4,  // TX allowed
+    NFA_DM_RFST_LISTEN_ACTIVE     = 5,  // ← Required for TX
+    NFA_DM_RFST_LISTEN_SLEEP      = 6,
+    NFA_DM_RFST_LP_LISTEN         = 7,
+    NFA_DM_RFST_LP_ACTIVE         = 8
+};
 ```
 
-**Finding the Symbol**:
+**Runtime Offset Detection**:
 ```javascript
-// Method 1: Symbol lookup
-const nfa_dm_cb = Module.findExportByName("libnfc-nci.so", "nfa_dm_cb");
-
-// Method 2: Pattern scanning (if symbol stripped)
-const pattern = "01 00 00 00";  // disc_state = DISCOVERY
-Memory.scanSync(base, size, pattern);
-```
-
-**Modification**:
-```javascript
-// Temporarily spoof state
-const discStatePtr = nfa_dm_cb.add(0x04);  // offset to disc_state
-const original = discStatePtr.readU8();
-discStatePtr.writeU8(0x05);  // LISTEN_ACTIVE
-// ... perform TX ...
-discStatePtr.writeU8(original);  // Restore
+// Find disc_cb offset in nfa_dm_cb at runtime
+function findDiscStateOffset() {
+    const nfa_dm_cb = Module.findExportByName("libnfc_nci_jni.so", "nfa_dm_cb");
+    
+    // Search for disc_state value (usually 0x00-0x08)
+    for (let offset = 0; offset < 0x100; offset++) {
+        const val = nfa_dm_cb.add(offset).readU8();
+        // Look for known state patterns
+        if (val >= 0 && val <= 8) {
+            console.log("Potential disc_state at offset 0x" + offset.toString(16) + ": " + val);
+        }
+    }
+}
 ```
 
 ---
 
-### 2.2 nfc_cb
+### 2.2 nfc_cb ✓ VERIFIED
 
 **Purpose**: Lower-level NFC control block
 
-**Structure Offset Map**:
-```
-Offset  Field           Type      Description
-------  --------------  --------  ----------------------
-0x00    nfc_state       uint8_t   NFC subsystem state
-0x01    num_conn_cbs    uint8_t   Number of connections
-0x04    conn_cb[0]      struct    Connection control block
-  +0x00   p_cback       pointer   Callback function
-  +0x08   conn_id       uint8_t   Connection ID
-  ...
-```
-
-**NFC State Values**:
-```cpp
-#define NFC_STATE_NONE              0x00
-#define NFC_STATE_W4_HAL_OPEN       0x01
-#define NFC_STATE_CORE_INIT         0x02
-#define NFC_STATE_W4_POST_INIT      0x03
-#define NFC_STATE_IDLE              0x04
-#define NFC_STATE_OPEN              0x05  // ← Required for TX
-#define NFC_STATE_CLOSING           0x06
-```
+**Symbol**: `nfc_cb`
+**Address (libnfc_nci_jni.so)**: `0x24cf20`
+**Size**: 680 bytes
 
 ---
 
-### 2.3 nfc_hal_entry
+## 3. Observe Mode Functions ✓ VERIFIED
 
-**Purpose**: HAL function table pointer
+### 3.1 android_nfc_nfc_observe_mode
 
-**Structure**:
-```cpp
-typedef struct {
-    void (*open)(callback1, callback2);
-    void (*close)(void);
-    void (*core_initialized)(uint16_t, uint8_t*);
-    int (*write)(uint16_t, uint8_t*);  // ★ Direct TX
-    int (*prediscover)(void);
-    void (*control_granted)(void);
-    void (*power_cycle)(void);
-    int (*get_max_nfcee)(void);
-} tHAL_NFC_ENTRY;
-```
+**Address (libnfc_nci_jni.so)**: `0x1f04f0`
+**Size**: 8 bytes
 
-**Direct HAL Write**:
-```javascript
-// Find HAL entry
-const nfc_hal_entry = Module.findExportByName("libnfc-nci.so", "nfc_hal_entry");
-const hal_table = nfc_hal_entry.readPointer();
-const hal_write = hal_table.add(3 * Process.pointerSize).readPointer();
+### 3.2 android_nfc_nfc_observe_mode_st_shim
 
-// Create NativeFunction
-const halWrite = new NativeFunction(hal_write, 'int', ['uint16', 'pointer']);
-
-// Send raw NCI packet
-const packet = Memory.alloc(32);
-// ... build packet ...
-halWrite(packet_len, packet);
-```
+**Address (libnfc_nci_jni.so)**: `0x1f0500`
+**Size**: 8 bytes (ST chipset shim)
 
 ---
 
-## 3. Symbol Discovery Methods
+## 4. Symbol Discovery Methods
 
-### 3.1 Using nm/objdump
+### 4.1 Using readelf (Recommended)
 
 ```bash
-# Extract symbols
-adb pull /system/lib64/libnfc-nci.so
-nm -C libnfc-nci.so | grep -E "nfa_dm|nci_snd|SendRaw"
+# Extract symbols from device
+adb pull /system_ext/lib64/libstnfc_nci_jni.so
 
-# Look for specific patterns
-objdump -t libnfc-nci.so | grep -i "data_exchange"
+# List all symbols with demangled names
+readelf --dyn-syms -W libstnfc_nci_jni.so | c++filt | grep -E "NFA_Send|nfa_dm|NFC_Send|ce_t3t"
 ```
 
-### 3.2 Using Frida
+### 4.2 Using Frida
 
 ```javascript
-// Enumerate all exports
-Module.enumerateExports("libnfc-nci.so").forEach(function(exp) {
-    if (exp.name.match(/nfa|nci|send|data/i)) {
-        console.log(exp.type + ": " + exp.name + " @ " + exp.address);
-    }
-});
+// Find specific function
+const target = Module.findExportByName("libnfc_nci_jni.so", "_Z16NFA_SendRawFramePhtt");
+console.log("NFA_SendRawFrame at: " + target);
 
-// Enumerate all symbols (including internal)
-Module.enumerateSymbols("libnfc-nci.so").forEach(function(sym) {
-    if (sym.name.match(/dm_cb|nfc_cb|hal_entry/i)) {
+// Enumerate all NFA-related symbols
+Module.enumerateSymbols("libnfc_nci_jni.so").forEach(function(sym) {
+    if (sym.name.match(/nfa_dm|NFA_Send|NFC_Send/i)) {
         console.log(sym.name + " @ " + sym.address);
     }
 });
 ```
 
-### 3.3 Pattern Matching (for stripped binaries)
-
-```javascript
-// Search for function prologue patterns
-const patterns = [
-    // ARM64 function prologue
-    "FD 7B BF A9",  // stp x29, x30, [sp, #-0x10]!
-    // Followed by specific instruction patterns
-];
-
-// Search for string references
-const strRef = Memory.scanSync(base, size, 
-    Array.from("is_data_exchange").map(c => c.charCodeAt(0).toString(16)).join(" "));
-```
-
 ---
 
-## 4. Hooking Framework Recommendations
-
-### 4.1 Frida (Recommended for Development)
-
-**Pros**:
-- Easy to use, rapid iteration
-- No need to recompile
-- Excellent debugging support
-
-**Cons**:
-- Requires PC connection or frida-server
-- May be detected by anti-tampering
-
-### 4.2 Xposed/LSPosed (For Java Layer)
-
-**Use Case**: Hook NfcService.java methods
-
-**Pros**:
-- Persistent hooks
-- No root required (with LSPosed)
-
-**Cons**:
-- Java layer only
-- Need to reboot for changes
-
-### 4.3 Dobby/Substrate (For Production)
-
-**Pros**:
-- Native library injection
-- No frida-server required
-- More stealthy
-
-**Cons**:
-- Requires compilation
-- More complex setup
-
----
-
-## 5. Example: Complete Bypass Flow
+## 5. Complete Bypass Flow (Corrected)
 
 ```
 1. Attach to com.android.nfc process
-2. Find libnfc-nci.so base address
-3. Locate nfa_dm_cb global variable
-4. Hook nfa_dm_is_data_exchange_allowed() → return true
-5. On SENSF_REQ detection:
-   a. Read current disc_state
-   b. Write LISTEN_ACTIVE (0x05) to disc_state
-   c. Build SENSF_RES packet
-   d. Call NFA_SendRawFrame() or direct HAL write
-   e. Restore original disc_state
-6. Monitor result
+2. Find libnfc_nci_jni.so (or libstnfc_nci_jni.so) base address
+3. Locate nfa_dm_cb global variable @ 0x24c0f8
+4. Determine disc_state offset within disc_cb (~0x04 from disc_cb start)
+5. On SENSF_REQ detection in Observe Mode:
+   a. Read current disc_state value
+   b. Temporarily write NFA_DM_RFST_LISTEN_ACTIVE (5) to disc_state
+   c. Build SENSF_RES packet (18 bytes: [len][0x01][IDm 8B][PMm 8B])
+   d. Call NFA_SendRawFrame() or hook nfa_dm_act_send_raw_frame()
+   e. Immediately restore original disc_state
+6. For Spray Mode: Repeat steps 5a-5e for 100 iterations with 3ms intervals
 ```
 
 ---
 
-*Reference Document Version: 1.0*
-*Target: Android 14/15, libnfc-nci.so*
+## 6. Hooking Framework Recommendations
+
+### 6.1 Frida (Recommended)
+
+**Pros**:
+- Rapid development and testing
+- No compilation required
+- Can be injected remotely via frida-server
+- RPC interface for integration with Java/Kotlin
+
+**Usage**:
+```bash
+# Inject script into NFC process
+frida -U -f com.android.nfc -l observe_mode_bypass.js --no-pause
+```
+
+### 6.2 Xposed/LSPosed (For Java Layer)
+
+**Use Cases**:
+- Hook `NfcService.sendRawFrame()`
+- Monitor `HostEmulationManager.onPollingLoopDetected()`
+- State coordination
+
+### 6.3 Native Hooking (Dobby removed)
+
+**Note**: Dobby-based hooks have been removed due to reliability issues.
+Use Frida for all native hooking requirements.
+
+---
+
+*Reference Document Version: 2.0 (Corrected)*
+*Target: Android 14/15, libnfc_nci_jni.so*
+*Last Updated: 2024-12-29*
