@@ -6,7 +6,7 @@
  * 
  * Based on AOSP analysis documented in ref_aosp/AOSP_NFC_ANALYSIS.md
  * 
- * Target: Android 14/15
+ * Target: Android 15+ (Observe Mode was introduced in Android 15)
  * Libraries: libstnfc_nci_jni.so (ST devices) or libnfc_nci_jni.so (AOSP)
  * 
  * Key Symbols (from binary analysis):
@@ -42,7 +42,7 @@ const CONFIG = {
         'libnfc-nci.so'           // Alternative naming
     ],
     
-    // NFA Discovery States (from nfa_dm_int.h:234-244)
+    // NFA Discovery States (from nfa_dm_int.h:230-238, Android 15)
     NFA_DM_RFST_IDLE: 0x00,
     NFA_DM_RFST_DISCOVERY: 0x01,          // Observe Mode state
     NFA_DM_RFST_W4_ALL_DISCOVERIES: 0x02,

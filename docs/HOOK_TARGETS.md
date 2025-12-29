@@ -355,5 +355,5 @@ Use Frida for all native hooking requirements.
 ---
 
 *Reference Document Version: 2.0 (Corrected)*
-*Target: Android 14/15, libnfc_nci_jni.so*
+*Target: Android 15+ (Observe Mode introduced in Android 15)*
 *Last Updated: 2024-12-29*

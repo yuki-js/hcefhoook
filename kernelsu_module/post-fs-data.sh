@@ -11,12 +11,15 @@
 # $MODDIR/
 #   ├── module.prop
 #   ├── post-fs-data.sh (this file)
-#   ├── system/
-#   │   └── etc/
-#   │       └── public.libraries.txt (appended with libstnfc_nci_jni.so)
-#   └── vendor/    <-- Mount point (NOT system/vendor!)
-#       └── etc/
-#           └── libnfc-nci.conf (etc.)
+#   └── system/
+#       ├── etc/
+#       │   └── public.libraries.txt (appended with libstnfc_nci_jni.so)
+#       └── vendor/
+#           └── etc/
+#               └── libnfc-nci.conf (etc.)
+#
+# NOTE: $MODDIR/vendor/ is auto-managed by KernelSU runtime - DO NOT create it manually!
+# Use $MODDIR/system/vendor/etc/ for vendor overlays.
 
 MODDIR="${0%/*}"
 LOGFILE="/data/local/tmp/hcefhook_ksu.log"
@@ -39,13 +42,13 @@ fi
 log "Root access confirmed"
 
 # Create overlay directories
-# KernelSU uses $MODDIR/vendor for /vendor overlays (not $MODDIR/system/vendor)
-mkdir -p "$MODDIR/vendor/etc"
+# KernelSU overlays /vendor from $MODDIR/system/vendor (NOT $MODDIR/vendor!)
+mkdir -p "$MODDIR/system/vendor/etc"
 mkdir -p "$MODDIR/system/etc"
 
 log "Created overlay directories:"
-log "  - $MODDIR/vendor/etc"
-log "  - $MODDIR/system/etc"
+log "  - $MODDIR/system/vendor/etc (for /vendor/etc overlays)"
+log "  - $MODDIR/system/etc (for /system/etc overlays)"
 
 override_key() {
     local FILE="$1"
@@ -62,13 +65,14 @@ override_key() {
 }
 
 # Check if libnfc-nci.conf exists on device
+# Note: /vendor/etc is the actual path on device (symlinked from /system/vendor/etc)
 VENDOR_NFC_CONF="/vendor/etc/libnfc-nci.conf"
 VENDOR_FELICA_CONF="/vendor/etc/libnfc-nci-felica.conf"
 
 execute_replace_nci() {
     local TARGET_FILE="$1"
     local BASENAME="$(basename "$TARGET_FILE")"
-    local OVERLAY_FILE="$MODDIR/vendor/etc/$BASENAME"
+    local OVERLAY_FILE="$MODDIR/system/vendor/etc/$BASENAME"
 
     if [ -f "$OVERLAY_FILE" ]; then
         log "Deleting previous $OVERLAY_FILE"
@@ -106,7 +110,7 @@ VENDOR_HALST_P_CONF="/vendor/etc/libnfc-hal-st-st54j.conf"
 execute_replace_halst() {
     local TARGET_FILE="$1"
     local BASENAME="$(basename "$TARGET_FILE")"
-    local OVERLAY_FILE="$MODDIR/vendor/etc/$BASENAME"
+    local OVERLAY_FILE="$MODDIR/system/vendor/etc/$BASENAME"
 
     if [ -f "$OVERLAY_FILE" ]; then
         log "Deleting previous $OVERLAY_FILE"
@@ -169,9 +173,9 @@ else
 fi
 
 # Set correct permissions for overlay files
-VENDOR_OVERLAY_DIR="$MODDIR/vendor/etc"
+VENDOR_OVERLAY_DIR="$MODDIR/system/vendor/etc"
 if [ -d "$VENDOR_OVERLAY_DIR" ]; then
-    chmod 755 "$MODDIR/vendor"
+    chmod 755 "$MODDIR/system/vendor"
     chmod 755 "$VENDOR_OVERLAY_DIR"
     for f in "$VENDOR_OVERLAY_DIR"/*.conf; do
         if [ -f "$f" ]; then
@@ -197,9 +201,6 @@ fi
 
 # List created files
 log "=== Created overlay files ==="
-find "$MODDIR/vendor" -type f 2>/dev/null | while read f; do
-    log "  $f"
-done
 find "$MODDIR/system" -type f 2>/dev/null | while read f; do
     log "  $f"
 done
