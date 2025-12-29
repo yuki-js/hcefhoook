@@ -100,14 +100,23 @@ static bool make_memory_writable(void* ptr, size_t size) {
     uintptr_t page_size = sysconf(_SC_PAGESIZE);
     uintptr_t addr = (uintptr_t)ptr;
     uintptr_t aligned_addr = addr & ~(page_size - 1);
-    size_t aligned_size = ((addr - aligned_addr) + size + page_size - 1) & ~(page_size - 1);
+    
+    // Check for overflow in aligned_size calculation
+    size_t offset = addr - aligned_addr;
+    if (offset > SIZE_MAX - size || (offset + size) > SIZE_MAX - page_size + 1) {
+        LOGE("Aligned size calculation would overflow");
+        return false;
+    }
+    
+    size_t aligned_size = ((offset + size + page_size - 1) / page_size) * page_size;
     
     LOGI("Attempting to make memory writable:");
     LOGI("  Original: %p (size: %zu)", ptr, size);
     LOGI("  Aligned:  %p (size: %zu)", (void*)aligned_addr, aligned_size);
     
-    // Try to change memory protection to RWX
-    int result = mprotect((void*)aligned_addr, aligned_size, PROT_READ | PROT_WRITE | PROT_EXEC);
+    // Change memory protection to RW only (no EXEC for security)
+    // We only need write access to modify the state variable
+    int result = mprotect((void*)aligned_addr, aligned_size, PROT_READ | PROT_WRITE);
     
     if (result == 0) {
         LOGI("✓ Memory region successfully made writable (mprotect succeeded)");
@@ -135,8 +144,8 @@ static bool is_memory_accessible(void* ptr, size_t size, bool require_write) {
     
     uintptr_t start_addr = (uintptr_t)ptr;
     
-    // Check for integer overflow (fixed: correct boundary check)
-    if (size > 0 && start_addr > UINTPTR_MAX - size + 1) {
+    // Check for integer overflow (correct boundary check)
+    if (start_addr > UINTPTR_MAX - size) {
         LOGE("Memory range calculation would overflow");
         return false;
     }
@@ -160,8 +169,9 @@ static bool is_memory_accessible(void* ptr, size_t size, bool require_write) {
         // Parse: address-range perms offset dev inode pathname
         // Use safer format specifier to prevent buffer overflow
         if (sscanf(line, "%lx-%lx %4[rwxps-]", &region_start, &region_end, perms) >= 3) {
-            // Check if our memory range falls within this region (exclusive end)
-            if (start_addr >= region_start && end_addr < region_end) {
+            // Check if our memory range falls within this region
+            // Both ranges use exclusive upper bound: [start, end)
+            if (start_addr >= region_start && end_addr <= region_end) {
                 // Check if region has required permissions
                 bool has_read = (perms[0] == 'r');
                 bool has_write = (perms[1] == 'w');
