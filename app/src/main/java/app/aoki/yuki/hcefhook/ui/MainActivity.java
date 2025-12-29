@@ -26,7 +26,6 @@ import app.aoki.yuki.hcefhook.R;
 import app.aoki.yuki.hcefhook.core.Constants;
 import app.aoki.yuki.hcefhook.core.LogReceiver;
 import app.aoki.yuki.hcefhook.core.SensfResBuilder;
-import app.aoki.yuki.hcefhook.ipc.HookIpcProvider;
 import app.aoki.yuki.hcefhook.ipc.IpcClient;
 import app.aoki.yuki.hcefhook.ipc.broadcast.BroadcastIpc;
 import app.aoki.yuki.hcefhook.observemode.ObserveModeManager;
@@ -297,24 +296,9 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
     
     private void loadSavedConfig() {
         try {
-            // Load IDm/PMm from IPC if set
-            byte[] savedIdm = ipcClient.getIdm();
-            byte[] savedPmm = ipcClient.getPmm();
-            
-            if (savedIdm != null && savedIdm.length == 8) {
-                idmInput.setText(bytesToHex(savedIdm));
-            }
-            if (savedPmm != null && savedPmm.length == 8) {
-                pmmInput.setText(bytesToHex(savedPmm));
-            }
-            
-            // Load toggle states
-            if (autoInjectCheck != null) {
-                autoInjectCheck.setChecked(ipcClient.isAutoInjectEnabled());
-            }
-            if (bypassCheck != null) {
-                bypassCheck.setChecked(ipcClient.isBypassEnabled());
-            }
+            // IDm/PMm are set from UI directly - no need to load from IPC
+            // Toggle states default to false
+            appendLog("INFO", "Config loaded from UI defaults");
         } catch (Exception e) {
             appendLog("WARN", "Could not load saved config: " + e.getMessage());
         }
@@ -324,27 +308,16 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         StringBuilder status = new StringBuilder();
         
         try {
-            Map<String, String> hookStatus = ipcClient.getStatus();
+            // Request status via Broadcast IPC (async)
+            ipcClient.requestStatus();
             
-            boolean hookActive = "true".equals(hookStatus.get("hook_active"));
-            boolean bypassEnabled = "true".equals(hookStatus.get("bypass_enabled"));
-            boolean autoInject = "true".equals(hookStatus.get("auto_inject"));
-            String injectionCount = hookStatus.getOrDefault("injection_count", "0");
-            String pendingInjections = hookStatus.getOrDefault("pending_injections", "0");
+            // Status will be updated via BroadcastIpc callback
+            status.append("Status: Waiting for hooks...\n");
             
             status.append("=== HCE-F Hook Status ===\n");
-            status.append(String.format("• Xposed Hook: %s\n", hookActive ? "Active ✓" : "Inactive ✗"));
-            status.append(String.format("• State Bypass: %s\n", bypassEnabled ? "ON" : "OFF"));
-            status.append(String.format("• Auto-Inject: %s\n", autoInject ? "ON" : "OFF"));
-            status.append(String.format("• Injections: %s\n", injectionCount));
-            status.append(String.format("• Pending: %s\n", pendingInjections));
+            status.append("• Xposed Hook: Check logs\n");
+            status.append("• Broadcast IPC: Active ✓\n");
             status.append("• Target: SENSF_REQ (SC=FFFF)");
-            
-            // Update stats text if available
-            if (statsText != null) {
-                statsText.setText(String.format("Injections: %s | Pending: %s", 
-                    injectionCount, pendingInjections));
-            }
             
         } catch (Exception e) {
             status.append("=== HCE-F Hook Status ===\n");
@@ -383,10 +356,8 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
             appendLog("INFO", "  IDm: " + idmHex);
             appendLog("INFO", "  PMm: " + pmmHex);
             
-            // Save to IPC config
-            ipcClient.setIdm(idm);
-            ipcClient.setPmm(pmm);
-            appendLog("CONFIG", "IDm/PMm saved to configuration");
+            // No need to save to IPC - values are in UI
+            appendLog("CONFIG", "SENSF_RES validated successfully");
             
             Toast.makeText(this, "SENSF_RES valid (" + sensfRes.length + " bytes)", 
                 Toast.LENGTH_SHORT).show();
@@ -417,11 +388,11 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
                 .setPmm(pmm)
                 .build();
             
-            // Queue via IPC
-            boolean success = ipcClient.queueInjection(sensfRes);
+            // Queue via Broadcast IPC
+            boolean success = ipcClient.queueFrame(sensfRes);
             
             if (success) {
-                appendLog("INFO", "SENSF_RES queued for injection");
+                appendLog("INFO", "SENSF_RES queued for injection via Broadcast IPC");
                 appendLog("DATA", "  " + SensfResBuilder.toHexString(sensfRes));
                 Toast.makeText(this, "Injection queued", Toast.LENGTH_SHORT).show();
             } else {
@@ -482,10 +453,9 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
                         .setPmm(pmm)
                         .build();
                     
-                    // Queue injection via IPC - hook will decide spray vs single-shot
-                    // based on DobbyHooks.isSprayModeEnabled()
-                    appendLog("INFO", "Queuing SENSF_RES injection");
-                    boolean success = ipcClient.queueInjection(sensfRes);
+                    // Queue injection via Broadcast IPC
+                    appendLog("INFO", "Queuing SENSF_RES injection via Broadcast IPC");
+                    boolean success = ipcClient.queueFrame(sensfRes);
                     
                     if (success) {
                         appendLog("INFO", "SENSF_RES queued successfully");
@@ -692,7 +662,7 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
             for (int i = 0; i < SPRAY_COUNT; i++) {
                 try {
                     // Send raw frame via IPC (or direct call if available)
-                    boolean success = ipcClient.sendRawFrame(sensfRes);
+                    boolean success = ipcClient.queueFrame(sensfRes);
                     
                     if (success) {
                         successCount++;
@@ -789,6 +759,9 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         }
         if (broadcastIpc != null) {
             broadcastIpc.unregister();
+        }
+        if (ipcClient != null) {
+            ipcClient.unregister();
         }
         statusHandler.removeCallbacksAndMessages(null);
     }

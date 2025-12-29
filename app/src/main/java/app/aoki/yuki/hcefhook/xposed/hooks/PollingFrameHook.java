@@ -219,26 +219,11 @@ public class PollingFrameHook {
                 app.aoki.yuki.hcefhook.ipc.IpcClient ipcClient = 
                     new app.aoki.yuki.hcefhook.ipc.IpcClient(context);
                 
-                if (ipcClient.isAutoInjectEnabled()) {
-                    // Get custom IDm/PMm if configured
-                    byte[] customIdm = ipcClient.getIdm();
-                    byte[] customPmm = ipcClient.getPmm();
-                    
-                    if (customIdm != null && customPmm != null) {
-                        sensfRes = new SensfResBuilder()
-                            .setIdm(customIdm)
-                            .setPmm(customPmm)
-                            .build();
-                        broadcaster.info("Using custom IDm/PMm from config");
-                    }
-                    
-                    // Attempt injection via SendRawFrameHook
-                    SendRawFrameHook.injectSensfRes(sensfRes);
-                } else {
-                    broadcaster.info("Auto-inject disabled, queuing for manual injection");
-                    // Queue for manual injection from app
-                    ipcClient.queueInjection(sensfRes);
-                }
+                // Always use direct injection (auto-inject handled by MainActivity)
+                // No need to query IDm/PMm from IPC - use defaults
+                SendRawFrameHook.injectSensfRes(sensfRes);
+                broadcaster.info("SENSF_RES injection attempted via SendRawFrameHook");
+                
             } catch (Exception e) {
                 broadcaster.error("IPC failed: " + e.getMessage());
                 // Fallback to direct injection attempt

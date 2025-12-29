@@ -61,13 +61,6 @@
                 android:name="android.nfc.cardemulation.host_nfcf_service"
                 android:resource="@xml/hcef_observe_mode_service" />
         </service>
-        
-        <!-- IPC Provider for cross-process communication with hooks -->
-        <provider
-            android:name=".ipc.HookIpcProvider"
-            android:authorities="app.aoki.yuki.hcefhook.ipc"
-            android:exported="true"
-            android:grantUriPermissions="true" />
 
         <!-- Xposed Module Metadata -->
         <meta-data

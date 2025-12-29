@@ -48,17 +48,21 @@ public class BroadcastIpc {
     private static final String ACTION_COMMAND = "app.aoki.yuki.hcefhook.ipc.COMMAND";
     private static final String ACTION_RESPONSE = "app.aoki.yuki.hcefhook.ipc.RESPONSE";
     private static final String ACTION_EVENT = "app.aoki.yuki.hcefhook.ipc.EVENT";
+    private static final String ACTION_PING = "app.aoki.yuki.hcefhook.ipc.PING";
+    private static final String ACTION_PONG = "app.aoki.yuki.hcefhook.ipc.PONG";
     
     // Intent extras
     private static final String EXTRA_COMMAND_TYPE = "command_type";
     private static final String EXTRA_DATA = "data";
     private static final String EXTRA_TIMESTAMP = "timestamp";
     private static final String EXTRA_SOURCE_PROCESS = "source_process";
+    private static final String EXTRA_PING_ID = "ping_id";
     
     private final Context context;
     private final String processName;
     private final CommandReceiver commandReceiver;
     private CommandHandler commandHandler;
+    private PingHandler pingHandler;
     private boolean registered = false;
     
     /**
@@ -73,6 +77,28 @@ public class BroadcastIpc {
          * @param sourceProcess Source process name
          */
         void onCommand(String commandType, Map<String, String> data, String sourceProcess);
+    }
+    
+    /**
+     * Ping handler interface for connection verification
+     */
+    public interface PingHandler {
+        /**
+         * Handle ping received (PONG is sent automatically)
+         * 
+         * @param pingId Ping identifier
+         * @param sourceProcess Source process name
+         */
+        void onPingReceived(String pingId, String sourceProcess);
+        
+        /**
+         * Handle pong received (response to our ping)
+         * 
+         * @param pingId Ping identifier
+         * @param sourceProcess Source process name
+         * @param latencyMs Latency in milliseconds
+         */
+        void onPongReceived(String pingId, String sourceProcess, long latencyMs);
     }
     
     /**
@@ -97,6 +123,15 @@ public class BroadcastIpc {
     }
     
     /**
+     * Set ping handler for connection verification
+     * 
+     * @param handler Handler for ping/pong events
+     */
+    public void setPingHandler(PingHandler handler) {
+        this.pingHandler = handler;
+    }
+    
+    /**
      * Register broadcast receiver
      * 
      * Call this in onCreate() or after setting command handler
@@ -111,6 +146,8 @@ public class BroadcastIpc {
         filter.addAction(ACTION_COMMAND);
         filter.addAction(ACTION_RESPONSE);
         filter.addAction(ACTION_EVENT);
+        filter.addAction(ACTION_PING);
+        filter.addAction(ACTION_PONG);
         
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -175,6 +212,49 @@ public class BroadcastIpc {
     }
     
     /**
+     * Send ping to verify connection (Mutual Ping)
+     * 
+     * The other process will automatically respond with PONG.
+     * 
+     * @param pingId Unique ping identifier (use timestamp or UUID)
+     * @return true if ping was sent
+     */
+    public boolean sendPing(String pingId) {
+        try {
+            Intent intent = new Intent(ACTION_PING);
+            intent.setPackage("app.aoki.yuki.hcefhook");
+            intent.putExtra(EXTRA_PING_ID, pingId);
+            intent.putExtra(EXTRA_SOURCE_PROCESS, processName);
+            intent.putExtra(EXTRA_TIMESTAMP, System.currentTimeMillis());
+            
+            context.sendBroadcast(intent);
+            Log.d(TAG, "[" + processName + "] Sent PING: " + pingId);
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "[" + processName + "] Failed to send ping: " + e.getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Internal method to send pong response
+     */
+    private void sendPong(String pingId, String targetProcess) {
+        try {
+            Intent intent = new Intent(ACTION_PONG);
+            intent.setPackage("app.aoki.yuki.hcefhook");
+            intent.putExtra(EXTRA_PING_ID, pingId);
+            intent.putExtra(EXTRA_SOURCE_PROCESS, processName);
+            intent.putExtra(EXTRA_TIMESTAMP, System.currentTimeMillis());
+            
+            context.sendBroadcast(intent);
+            Log.d(TAG, "[" + processName + "] Sent PONG: " + pingId + " to " + targetProcess);
+        } catch (Exception e) {
+            Log.e(TAG, "[" + processName + "] Failed to send pong: " + e.getMessage());
+        }
+    }
+    
+    /**
      * Internal broadcast sender
      */
     private void sendBroadcast(String action, String commandType, Map<String, String> data) {
@@ -210,6 +290,17 @@ public class BroadcastIpc {
             }
             
             String action = intent.getAction();
+            
+            // Handle PING/PONG separately
+            if (ACTION_PING.equals(action)) {
+                handlePing(intent);
+                return;
+            } else if (ACTION_PONG.equals(action)) {
+                handlePong(intent);
+                return;
+            }
+            
+            // Handle regular commands/responses
             String commandType = intent.getStringExtra(EXTRA_COMMAND_TYPE);
             String sourceProcess = intent.getStringExtra(EXTRA_SOURCE_PROCESS);
             
@@ -223,7 +314,8 @@ public class BroadcastIpc {
             for (String key : intent.getExtras().keySet()) {
                 if (!key.equals(EXTRA_COMMAND_TYPE) && 
                     !key.equals(EXTRA_SOURCE_PROCESS) && 
-                    !key.equals(EXTRA_TIMESTAMP)) {
+                    !key.equals(EXTRA_TIMESTAMP) &&
+                    !key.equals(EXTRA_PING_ID)) {
                     Object value = intent.getExtras().get(key);
                     if (value instanceof String) {
                         data.put(key, (String) value);
@@ -242,6 +334,45 @@ public class BroadcastIpc {
                 }
             } else {
                 Log.w(TAG, "[" + processName + "] No command handler registered");
+            }
+        }
+        
+        private void handlePing(Intent intent) {
+            String pingId = intent.getStringExtra(EXTRA_PING_ID);
+            String sourceProcess = intent.getStringExtra(EXTRA_SOURCE_PROCESS);
+            
+            Log.d(TAG, "[" + processName + "] Received PING: " + pingId + " from " + sourceProcess);
+            
+            // Automatically send PONG
+            sendPong(pingId, sourceProcess);
+            
+            // Notify ping handler if registered
+            if (pingHandler != null) {
+                try {
+                    pingHandler.onPingReceived(pingId, sourceProcess);
+                } catch (Exception e) {
+                    Log.e(TAG, "[" + processName + "] Ping handler error: " + e.getMessage());
+                }
+            }
+        }
+        
+        private void handlePong(Intent intent) {
+            String pingId = intent.getStringExtra(EXTRA_PING_ID);
+            String sourceProcess = intent.getStringExtra(EXTRA_SOURCE_PROCESS);
+            long pongTime = System.currentTimeMillis();
+            long pingTime = intent.getLongExtra(EXTRA_TIMESTAMP, pongTime);
+            long latency = pongTime - pingTime;
+            
+            Log.d(TAG, "[" + processName + "] Received PONG: " + pingId + " from " + sourceProcess + 
+                      " (latency: " + latency + "ms)");
+            
+            // Notify ping handler if registered
+            if (pingHandler != null) {
+                try {
+                    pingHandler.onPongReceived(pingId, sourceProcess, latency);
+                } catch (Exception e) {
+                    Log.e(TAG, "[" + processName + "] Pong handler error: " + e.getMessage());
+                }
             }
         }
     }
