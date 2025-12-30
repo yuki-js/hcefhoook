@@ -30,6 +30,9 @@ public class PollingFrameHook {
     
     private static final String TAG = "HcefHook.PollingFrame";
     
+    // Installation flag
+    private static volatile boolean installed = false;
+    
     // Callback for SENSF_REQ detection
     private static SensfReqCallback callback;
     
@@ -42,6 +45,13 @@ public class PollingFrameHook {
     
     public static void setCallback(SensfReqCallback cb) {
         callback = cb;
+    }
+    
+    /**
+     * Check if hook is installed
+     */
+    public static boolean isInstalled() {
+        return installed;
     }
     
     /**
@@ -59,6 +69,7 @@ public class PollingFrameHook {
         // This is called when the NFCC sends polling frames in Observe Mode
         try {
             hookPollingLoopHandler(lpparam, broadcaster);
+            installed = true;
         } catch (Throwable t) {
             XposedBridge.log(TAG + ": Failed to hook polling loop: " + t.getMessage());
             broadcaster.error("Polling loop hook failed: " + t.getMessage());
@@ -208,26 +219,11 @@ public class PollingFrameHook {
                 app.aoki.yuki.hcefhook.ipc.IpcClient ipcClient = 
                     new app.aoki.yuki.hcefhook.ipc.IpcClient(context);
                 
-                if (ipcClient.isAutoInjectEnabled()) {
-                    // Get custom IDm/PMm if configured
-                    byte[] customIdm = ipcClient.getIdm();
-                    byte[] customPmm = ipcClient.getPmm();
-                    
-                    if (customIdm != null && customPmm != null) {
-                        sensfRes = new SensfResBuilder()
-                            .setIdm(customIdm)
-                            .setPmm(customPmm)
-                            .build();
-                        broadcaster.info("Using custom IDm/PMm from config");
-                    }
-                    
-                    // Attempt injection via SendRawFrameHook
-                    SendRawFrameHook.injectSensfRes(sensfRes);
-                } else {
-                    broadcaster.info("Auto-inject disabled, queuing for manual injection");
-                    // Queue for manual injection from app
-                    ipcClient.queueInjection(sensfRes);
-                }
+                // Always use direct injection (auto-inject handled by MainActivity)
+                // No need to query IDm/PMm from IPC - use defaults
+                SendRawFrameHook.injectSensfRes(sensfRes);
+                broadcaster.info("SENSF_RES injection attempted via SendRawFrameHook");
+                
             } catch (Exception e) {
                 broadcaster.error("IPC failed: " + e.getMessage());
                 // Fallback to direct injection attempt

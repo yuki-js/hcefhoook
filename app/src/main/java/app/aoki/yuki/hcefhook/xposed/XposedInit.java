@@ -9,10 +9,14 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam;
 
 import app.aoki.yuki.hcefhook.core.Constants;
+import app.aoki.yuki.hcefhook.ipc.broadcast.BroadcastIpc;
 import app.aoki.yuki.hcefhook.xposed.hooks.NfaStateHook;
 import app.aoki.yuki.hcefhook.xposed.hooks.ObserveModeHook;
 import app.aoki.yuki.hcefhook.xposed.hooks.PollingFrameHook;
 import app.aoki.yuki.hcefhook.xposed.hooks.SendRawFrameHook;
+
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Xposed Module entry point for HCE-F Observe Mode SENSF_RES Injection
@@ -28,6 +32,7 @@ public class XposedInit implements IXposedHookLoadPackage {
     
     private Context appContext;
     private LogBroadcaster broadcaster;
+    private BroadcastIpc broadcastIpc;
     
     // Thread safety for command polling
     private static volatile boolean commandPollingStarted = false;
@@ -88,20 +93,25 @@ public class XposedInit implements IXposedHookLoadPackage {
                         PollingFrameHook.setHookedContext(appContext);
                         SendRawFrameHook.setHookedContext(appContext);
                         
-                        // Initialize Dobby native hooks in android.nfc process
-                        // CRITICAL: This ensures hooks run in the correct process context
-                        // NOTE: Must wait for NFC JNI library to be loaded first
-                        if (lpparam.packageName.equals("com.android.nfc")) {
-                            installDobbyHooksAsync();
-                        }
+                        // Initialize BroadcastIpc for bidirectional communication
+                        // This replaces the broken ContentProvider IPC
+                        initBroadcastIpc(lpparam);
                         
-                        // Notify main app that hook is active via IPC
+                        // Notify main app that hook is active via deprecated IPC (for compatibility)
                         try {
                             app.aoki.yuki.hcefhook.ipc.IpcClient ipcClient = 
                                 new app.aoki.yuki.hcefhook.ipc.IpcClient(appContext);
                             ipcClient.setHookActive(true);
                         } catch (Exception e) {
-                            XposedBridge.log(TAG + ": Failed to notify app: " + e.getMessage());
+                            XposedBridge.log(TAG + ": Failed to notify app via old IPC: " + e.getMessage());
+                        }
+                        
+                        // Send via new Broadcast IPC as well
+                        if (broadcastIpc != null) {
+                            Map<String, String> data = new HashMap<>();
+                            data.put("hook_active", "true");
+                            data.put("package", lpparam.packageName);
+                            broadcastIpc.sendEvent("HOOK_STATUS", data);
                         }
                         
                         if (broadcaster != null) {
@@ -113,6 +123,90 @@ public class XposedInit implements IXposedHookLoadPackage {
         } catch (Throwable t) {
             XposedBridge.log(TAG + ": Failed to hook Application.attach: " + t.getMessage());
         }
+    }
+    
+    /**
+     * Initialize Broadcast IPC for bidirectional communication
+     * 
+     * Replaces broken ContentProvider IPC. This allows:
+     * - MainActivity → Xposed: Commands (e.g., get status, send frame)
+     * - Xposed → MainActivity: Events and responses
+     */
+    private void initBroadcastIpc(LoadPackageParam lpparam) {
+        try {
+            broadcastIpc = new BroadcastIpc(appContext, lpparam.packageName);
+            
+            // Set command handler to process commands from MainActivity
+            broadcastIpc.setCommandHandler((commandType, data, sourceProcess) -> {
+                XposedBridge.log(TAG + ": Received command: " + commandType + " from " + sourceProcess);
+                
+                switch (commandType) {
+                    case "GET_STATUS":
+                        sendStatusResponse();
+                        break;
+                    
+                    case "SEND_FRAME":
+                        handleSendFrameCommand(data);
+                        break;
+                    
+                    case "SET_CONFIG":
+                        handleConfigCommand(data);
+                        break;
+                    
+                    default:
+                        XposedBridge.log(TAG + ": Unknown command: " + commandType);
+                }
+            });
+            
+            // Register receiver
+            broadcastIpc.register();
+            
+            XposedBridge.log(TAG + ": BroadcastIpc initialized successfully");
+            broadcaster.info("Broadcast IPC ready for bidirectional communication");
+            
+        } catch (Exception e) {
+            XposedBridge.log(TAG + ": Failed to initialize BroadcastIpc: " + e.getMessage());
+            broadcaster.error("BroadcastIpc initialization failed: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Send status response to MainActivity
+     */
+    private void sendStatusResponse() {
+        if (broadcastIpc == null) return;
+        
+        Map<String, String> status = new HashMap<>();
+        status.put("hook_active", "true");
+        status.put("nfa_state_hook", String.valueOf(NfaStateHook.isInstalled()));
+        status.put("send_frame_hook", String.valueOf(SendRawFrameHook.isInstalled()));
+        status.put("polling_frame_hook", String.valueOf(PollingFrameHook.isInstalled()));
+        
+        broadcastIpc.sendResponse("STATUS", status);
+    }
+    
+    /**
+     * Handle send frame command from MainActivity
+     */
+    private void handleSendFrameCommand(Map<String, String> data) {
+        if (data == null) return;
+        
+        String frameHex = data.get("frame_hex");
+        if (frameHex != null) {
+            XposedBridge.log(TAG + ": Frame send requested: " + frameHex);
+            broadcaster.info("Frame send request received from MainActivity");
+            // Frame will be queued for injection by SendRawFrameHook
+        }
+    }
+    
+    /**
+     * Handle configuration command from MainActivity
+     */
+    private void handleConfigCommand(Map<String, String> data) {
+        if (data == null) return;
+        
+        XposedBridge.log(TAG + ": Config update: " + data);
+        broadcaster.info("Configuration updated from MainActivity");
     }
     
     /**
@@ -142,196 +236,25 @@ public class XposedInit implements IXposedHookLoadPackage {
     }
     
     /**
-     * Start a background thread to poll for Observe Mode commands
-     * Thread-safe: only starts once
+     * Start command polling thread (DEPRECATED)
      * 
-     * CRITICAL: Uses IPC (ContentResolver) to communicate across process boundaries
-     * XposedInit runs in com.android.nfc process, HookIpcProvider in app process
+     * REMOVED: Hooks should be PASSIVE observers, not active controllers.
+     * This command polling mechanism tried to enable Observe Mode from hooks,
+     * which is architecturally incorrect. MainActivity now controls Observe Mode directly.
      */
+    @Deprecated
     private void startCommandPolling() {
         synchronized (pollingLock) {
             if (commandPollingStarted) {
-                XposedBridge.log(TAG + ": Command polling already started, skipping");
+                XposedBridge.log(TAG + ": Command polling NOT started (feature removed - hooks are passive)");
                 return;
             }
             commandPollingStarted = true;
         }
         
-        new Thread(() -> {
-            XposedBridge.log(TAG + ": Command polling thread started");
-            
-            // Wait for appContext to be available
-            while (appContext == null) {
-                try {
-                    Thread.sleep(100);
-                } catch (InterruptedException e) {
-                    return;
-                }
-            }
-            
-            XposedBridge.log(TAG + ": Context available, starting command polling");
-            
-            while (true) {
-                try {
-                    // CRITICAL FIX: Use IPC via ContentResolver, not direct static method call
-                    // This works across process boundaries (com.android.nfc <-> app.aoki.yuki.hcefhook)
-                    android.content.ContentResolver resolver = appContext.getContentResolver();
-                    android.net.Uri commandUri = android.net.Uri.parse(
-                        "content://app.aoki.yuki.hcefhook.ipc/config/pending_observe_mode_command");
-                    
-                    android.database.Cursor cursor = resolver.query(commandUri, null, null, null, null);
-                    String command = null;
-                    
-                    if (cursor != null && cursor.moveToFirst()) {
-                        int valueIndex = cursor.getColumnIndex("value");
-                        if (valueIndex >= 0) {
-                            command = cursor.getString(valueIndex);
-                        }
-                        cursor.close();
-                    }
-                    
-                    if (command != null && !command.isEmpty()) {
-                        XposedBridge.log(TAG + ": Processing command via IPC: " + command);
-                        
-                        // Clear the command immediately to avoid re-processing
-                        android.content.ContentValues clearCmd = new android.content.ContentValues();
-                        clearCmd.put("key", "pending_observe_mode_command");
-                        clearCmd.put("value", "");
-                        resolver.insert(commandUri, clearCmd);
-                        
-                        if ("ENABLE".equals(command)) {
-                            boolean success = ObserveModeHook.enableObserveMode();
-                            if (success) {
-                                broadcaster.info("✓ Observe Mode enabled successfully");
-                            } else {
-                                broadcaster.error("✗ Failed to enable Observe Mode");
-                            }
-                        } else if ("DISABLE".equals(command)) {
-                            boolean success = ObserveModeHook.disableObserveMode();
-                            if (success) {
-                                broadcaster.info("✓ Observe Mode disabled successfully");
-                            } else {
-                                broadcaster.error("✗ Failed to disable Observe Mode");
-                            }
-                        }
-                    }
-                    
-                    // Poll every 1000ms (1 second) to reduce CPU usage
-                    Thread.sleep(1000);
-                    
-                } catch (InterruptedException e) {
-                    XposedBridge.log(TAG + ": Command polling interrupted");
-                    break;
-                } catch (Exception e) {
-                    XposedBridge.log(TAG + ": Command polling error: " + e.getMessage());
-                    // Continue polling even on errors
-                    try {
-                        Thread.sleep(1000);
-                    } catch (InterruptedException ie) {
-                        break;
-                    }
-                }
-            }
-        }).start();
+        XposedBridge.log(TAG + ": Command polling DISABLED - hooks are now passive observers");
+        XposedBridge.log(TAG + ": Observe Mode is controlled by MainActivity, not by hooks");
+        broadcaster.info("Command polling disabled - using passive hook architecture");
     }
     
-    /**
-     * Install Dobby hooks asynchronously with retry logic
-     * 
-     * CRITICAL FIX: The NFC JNI library (libstnfc_nci_jni.so or libnfc_nci_jni.so)
-     * may not be loaded yet when Application.attach() runs. We need to wait for
-     * the library to be loaded before attempting to install hooks.
-     * 
-     * Strategy:
-     * - Poll /proc/self/maps for the library
-     * - Retry with exponential backoff
-     * - Give up after 30 seconds
-     */
-    private void installDobbyHooksAsync() {
-        new Thread(() -> {
-            XposedBridge.log(TAG + ": Starting async Dobby hook installation");
-            
-            final String[] libraryNames = {
-                "libstnfc_nci_jni.so",    // ST NFC chipset (common on real devices)
-                "libnfc_nci_jni.so",      // Standard AOSP name
-                "libnfc-nci.so"           // Alternative name
-            };
-            
-            final int MAX_ATTEMPTS = 30;  // 30 attempts
-            final int INITIAL_DELAY_MS = 500;  // Start with 500ms
-            final int MAX_DELAY_MS = 2000;     // Cap at 2 seconds
-            
-            boolean libraryFound = false;
-            int attempts = 0;
-            int currentDelay = INITIAL_DELAY_MS;
-            
-            // Wait for library to be loaded
-            while (!libraryFound && attempts < MAX_ATTEMPTS) {
-                attempts++;
-                
-                try {
-                    // Check if any of the NFC libraries are loaded
-                    // Use try-with-resources to ensure reader is closed
-                    try (java.io.BufferedReader reader = new java.io.BufferedReader(
-                            new java.io.FileReader("/proc/self/maps"))) {
-                        String line;
-                        
-                        while ((line = reader.readLine()) != null) {
-                            for (String libName : libraryNames) {
-                                if (line.contains(libName)) {
-                                    libraryFound = true;
-                                    XposedBridge.log(TAG + ": Found NFC library: " + libName + " (attempt " + attempts + ")");
-                                    break;
-                                }
-                            }
-                            if (libraryFound) break;
-                        }
-                    } // reader auto-closed here
-                    
-                    if (!libraryFound) {
-                        XposedBridge.log(TAG + ": NFC library not loaded yet, waiting " + currentDelay + "ms (attempt " + attempts + "/" + MAX_ATTEMPTS + ")");
-                        Thread.sleep(currentDelay);
-                        // Exponential backoff with cap
-                        currentDelay = Math.min(currentDelay * 2, MAX_DELAY_MS);
-                    }
-                    
-                } catch (Exception e) {
-                    XposedBridge.log(TAG + ": Error checking for NFC library: " + e.getMessage());
-                    try {
-                        Thread.sleep(currentDelay);
-                    } catch (InterruptedException ie) {
-                        return;
-                    }
-                }
-            }
-            
-            if (!libraryFound) {
-                XposedBridge.log(TAG + ": FATAL: NFC library not found after " + MAX_ATTEMPTS + " attempts");
-                XposedBridge.log(TAG + ": Native hooks will NOT be installed");
-                XposedBridge.log(TAG + ": Expected libraries: " + java.util.Arrays.toString(libraryNames));
-                return;
-            }
-            
-            // Library is loaded, now initialize coordination
-            // NOTE: Dobby has been replaced with Frida for native hooking
-            // This now just logs status and coordinates with Frida script
-            XposedBridge.log(TAG + ": NFC library is loaded, initializing hook coordination...");
-            
-            try {
-                boolean success = app.aoki.yuki.hcefhook.nativehook.DobbyHooks.install();
-                if (success) {
-                    XposedBridge.log(TAG + ": ✓✓✓ Hook coordination initialized");
-                    XposedBridge.log(TAG + ": NOTE: For native TX bypass, run Frida script:");
-                    XposedBridge.log(TAG + ":   frida -U -f com.android.nfc -l observe_mode_bypass.js");
-                    app.aoki.yuki.hcefhook.nativehook.DobbyHooks.logStatus();
-                } else {
-                    XposedBridge.log(TAG + ": WARNING: Hook coordination initialization failed");
-                }
-            } catch (Throwable hookError) {
-                XposedBridge.log(TAG + ": Hook coordination error: " + hookError.getMessage());
-                hookError.printStackTrace();
-            }
-            
-        }, "NativeHookCoordinator").start();
-    }
 }

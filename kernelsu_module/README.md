@@ -1,147 +1,69 @@
-# HCE-F Hook - KernelSU Module
+# HCE-F Hook - KernelSU/Magisk Module
 
-## Overview
-
-This KernelSU module enables Host-based SENSF_RES injection in Android NFC Observe Mode by:
-
-1. **Config File Overlay**: Modifies `/vendor/etc/libnfc-nci.conf` to enable Observe Mode and polling notifications
-2. **Root Access**: Provides root privileges to NFC service for native hook injection
-3. **FeliCa Support**: Configures Host-based FeliCa emulation for SC=FFFF wildcards
-
-## Requirements
-
-- **KernelSU**: Kernel-level root solution (https://kernelsu.org/)
-- **LSPosed**: Xposed framework for hooking NFC service (https://github.com/LSPosed/LSPosed)
-- **HCE-F Hook App**: Main application (app.aoki.yuki.hcefhook)
-- **Android 14/15**: Tested on Google Pixel devices
-- **NFC Hardware**: STMicroelectronics ST21NFC chip recommended
-
-## Installation
-
-### 1. Install KernelSU
-
-Follow official KernelSU installation guide for your device.
-
-### 2. Install LSPosed
-
-Install LSPosed via KernelSU or Magisk.
-
-### 3. Install HCE-F Hook App
-
-```bash
-adb install app-debug.apk
-```
-
-### 4. Install This Module
-
-```bash
-# Package module
-cd kernelsu_module
-zip -r hcefhook_ksu.zip *
-
-# Install via KernelSU Manager or adb
-adb push hcefhook_ksu.zip /sdcard/
-# Then install via KernelSU Manager app
-```
-
-### 5. Configure Root Access
-
-Open KernelSU Manager and add to root whitelist:
-- `app.aoki.yuki.hcefhook` (HCE-F Hook app)
-- `com.android.nfc` (NFC service)
-
-### 6. Configure LSPosed
-
-1. Open LSPosed Manager
-2. Enable HCE-F Hook module
-3. Select scope: `com.android.nfc`
-4. Restart device
+NFC Observe Mode support module for Android devices.
 
 ## What This Module Does
 
-### Post-FS-Data Stage (`post-fs-data.sh`)
+This module overlays NFC configuration files to:
+- Enable NFC debug logging
+- Set default NFC-F system code to 0x4000
+- Route NFC-F traffic to host (not secure element)
+- Allow Xposed module to access NFC JNI libraries
 
-Creates overlay for `/vendor/etc/libnfc-nci.conf` with:
+## Requirements
 
-```
-# Enable NCI Android polling frame notifications
-NCI_ANDROID_POLLING_FRAME_NTF=0x01
+- Android 11+ (API 30+)
+- KernelSU or Magisk
+- NFC-enabled device
+- ST Microelectronics NFC controller (ST21NFCD or similar)
 
-# Disable eSE auto-response for wildcard System Code
-ESE_LISTEN_TECH_MASK=0x00
-```
+## Installation
 
-And for `/vendor/etc/libnfc-nci-felica.conf` (if exists):
+1. Flash this module via KernelSU or Magisk Manager
+2. Reboot device
+3. Install HCE-F Hook app
+4. Enable Xposed/LSPosed module
+5. Reboot again
 
-```
-# Enable Host-based FeliCa handling
-FELICA_HOST_LISTEN=0x01
-FELICA_SYSTEM_CODE=0xFFFF
-```
+## Files Modified (Overlaid)
 
-### Service Stage (`service.sh`)
+The module overlays the following files (originals are preserved):
 
-- Waits for boot completion
-- Identifies app and NFC service UIDs
-- Logs information for manual KernelSU whitelist configuration
+- `/vendor/etc/libnfc-nci.conf` - Main NFC configuration
+- `/vendor/etc/libnfc-nci-felica.conf` - FeliCa-specific config (if exists)
+- `/vendor/etc/libnfc-hal-st.conf` - ST HAL configuration
+- `/vendor/etc/libnfc-hal-st-st54j.conf` - ST54J variant config (if exists)
+- `/system/etc/public.libraries.txt` - Added NFC JNI library access
 
-## Verification
+## Configuration Changes
 
-Check if module is working:
+### NFC Configuration Files
+- `NFC_DEBUG_ENABLED = 1` - Enable debug logging
+- `DEFAULT_SYS_CODE = {40:00}` - Set default system code
 
-```bash
-# Check logs
-adb shell cat /data/local/tmp/hcefhook_ksu.log
+### HAL Configuration Files
+- `DEFAULT_SYS_CODE_ROUTE = 0x00` - Route to DH (host)
+- `DEFAULT_NFCF_ROUTE = 0x00` - Route NFC-F to host
+- `DEFAULT_ROUTE = 0x00` - Default route to host
+- `DEFAULT_ISODEP_ROUTE = 0x00` - ISO-DEP to host
 
-# Verify overlay is active
-adb shell cat /vendor/etc/libnfc-nci.conf | grep NCI_ANDROID_POLLING_FRAME_NTF
+## Logs
 
-# Check NFC service has root
-adb shell su -c "ps -A | grep nfc"
-```
-
-## Troubleshooting
-
-### Module Not Loading
-- Check KernelSU Manager shows module as enabled
-- Verify module.prop is valid
-- Check `/data/local/tmp/hcefhook_ksu.log` for errors
-
-### NFC Service Crashes
-- Verify overlay config syntax is correct
-- Try disabling module temporarily
-- Check logcat: `adb logcat | grep -i nfc`
-
-### Hooks Not Working
-- Ensure both apps are in KernelSU root whitelist
-- Verify LSPosed module is enabled and scoped correctly
-- Check Xposed logs in LSPosed Manager
-
-### SELinux Denials
-- Check for denials: `adb shell su -c "dmesg | grep avc"`
-- Temporarily set permissive: `adb shell su -c "setenforce 0"`
-- For permanent fix, create custom SELinux policy
+Installation logs are saved to: `/data/local/tmp/hcefhook_install.log`
 
 ## Uninstallation
 
-1. Disable module in KernelSU Manager
-2. Reboot device
-3. Original NFC configs will be restored
+Remove the module via KernelSU/Magisk Manager and reboot.
+All overlaid files will be reverted to originals automatically.
 
-## Security Notice
+## License
 
-This module:
-- Modifies system NFC configuration
-- Requires root access
-- May affect NFC security features
-- Is for research and educational purposes only
+See main project LICENSE file.
 
-**Use responsibly and only on devices you own.**
+## Author
 
-## References
+yuki-js (https://github.com/yuki-js/hcefhoook)
 
-- Main project: https://github.com/yuki-js/hcefhoook
-- KernelSU: https://kernelsu.org/
-- LSPosed: https://github.com/LSPosed/LSPosed
-- NCI Specification 2.2
-- JIS X 6319-4 (FeliCa)
+## Based On
+
+MMT-Extended template by Zackptg5 (https://github.com/symbuzzer/MMT-Extended-Next)

@@ -30,6 +30,9 @@ public class SendRawFrameHook {
     
     private static final String TAG = "HcefHook.SendRaw";
     
+    // Installation flag
+    private static volatile boolean installed = false;
+    
     // Context from hooked process
     private static Context hookedContext;
     
@@ -39,6 +42,13 @@ public class SendRawFrameHook {
     
     // Reference to native NFC manager for calling send methods
     private static Object nativeNfcManagerInstance = null;
+    
+    /**
+     * Check if hook is installed
+     */
+    public static boolean isInstalled() {
+        return installed;
+    }
     
     /**
      * Set context obtained from hooked process
@@ -56,21 +66,11 @@ public class SendRawFrameHook {
         XposedBridge.log(TAG + ": SENSF_RES queued for injection: " + 
             SensfResBuilder.toHexString(sensfRes));
         
-        // CRITICAL INTEGRATION: Use SprayController if spray mode is enabled
-        try {
-            if (app.aoki.yuki.hcefhook.nativehook.DobbyHooks.isSprayModeEnabled()) {
-                XposedBridge.log(TAG + ": ✓ Spray mode enabled - using SprayController");
-                SprayController.startSpray(sensfRes);
-                // Don't clear pending injection - spray controller handles it
-                return;
-            }
-        } catch (Exception e) {
-            XposedBridge.log(TAG + ": Could not check spray mode: " + e.getMessage());
-        }
-        
-        // LEGACY: Fall back to single-shot injection
-        XposedBridge.log(TAG + ": Using single-shot injection");
-        attemptInjection();
+        // Use SprayController for continuous transmission
+        XposedBridge.log(TAG + ": Using SprayController for continuous transmission");
+        SprayController.startSpray(sensfRes);
+        // Don't clear pending injection - spray controller handles it
+        return;
     }
     
     /**
@@ -86,6 +86,7 @@ public class SendRawFrameHook {
         // Hook NfcService send methods
         hookNfcServiceSend(lpparam, broadcaster);
         
+        installed = true;
         broadcaster.info("Send raw frame hooks installed");
     }
     

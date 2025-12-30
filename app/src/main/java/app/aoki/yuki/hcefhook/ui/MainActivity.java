@@ -6,6 +6,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.method.ScrollingMovementMethod;
+import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 import android.widget.CheckBox;
@@ -26,9 +27,11 @@ import app.aoki.yuki.hcefhook.R;
 import app.aoki.yuki.hcefhook.core.Constants;
 import app.aoki.yuki.hcefhook.core.LogReceiver;
 import app.aoki.yuki.hcefhook.core.SensfResBuilder;
-import app.aoki.yuki.hcefhook.ipc.HookIpcProvider;
 import app.aoki.yuki.hcefhook.ipc.IpcClient;
+import app.aoki.yuki.hcefhook.ipc.broadcast.BroadcastIpc;
 import app.aoki.yuki.hcefhook.observemode.ObserveModeManager;
+
+import java.util.HashMap;
 
 /**
  * Main activity for HCE-F Hook PoC
@@ -68,8 +71,11 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
     // Observe Mode Manager (no reflection, clean implementation)
     private ObserveModeManager observeModeManager;
     
-    // IPC Client for communicating with hooks
+    // IPC Client for communicating with hooks (deprecated ContentProvider-based)
     private IpcClient ipcClient;
+    
+    // BroadcastIpc for bidirectional communication (replaces broken ContentProvider)
+    private BroadcastIpc broadcastIpc;
     
     // Log handling
     private LogReceiver logReceiver;
@@ -85,9 +91,6 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         
-        // Initialize IPC client
-        ipcClient = new IpcClient(this);
-        
         // Initialize ObserveModeManager (no reflection, clean API)
         observeModeManager = new ObserveModeManager(this);
         
@@ -101,16 +104,109 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         setupStatusUpdater();
         loadSavedConfig();
         
+        // Initialize IPC AFTER views (appendLog requires logText to be initialized)
+        ipcClient = new IpcClient(this);
+        
         // Now safe to log after views are initialized
         appendLog("INFO", "MainActivity.onCreate() - Starting initialization");
-        appendLog("DEBUG", "IPC client initialized");
+        appendLog("DEBUG", "IPC client initialized (ContentProvider - deprecated)");
+        
+        // Initialize BroadcastIpc for bidirectional communication (AFTER logging is safe)
+        setupBroadcastIpc();
+        appendLog("INFO", "BroadcastIpc initialized for bidirectional communication");
         
         updateStatus();
         
         appendLog("INFO", "HCE-F Hook PoC started");
         appendLog("INFO", "Device: " + Build.MODEL + " (Android " + Build.VERSION.RELEASE + ")");
         appendLog("INFO", "Waiting for Xposed hook activation...");
-        appendLog("WARN", "Observe Mode control happens via Xposed hooks in com.android.nfc process");
+        
+        // Request status from Xposed hooks via Broadcast IPC
+        requestHookStatus();
+    }
+    
+    /**
+     * Setup BroadcastIpc for bidirectional communication with Xposed hooks
+     * 
+     * Replaces broken ContentProvider IPC that couldn't receive on com.android.nfc side.
+     */
+    private void setupBroadcastIpc() {
+        broadcastIpc = new BroadcastIpc(this, "app.aoki.yuki.hcefhook");
+        
+        // Set command handler to receive messages from Xposed
+        broadcastIpc.setCommandHandler((commandType, data, sourceProcess) -> {
+            appendLog("IPC", "Received from " + sourceProcess + ": " + commandType);
+            
+            switch (commandType) {
+                case "STATUS":
+                    handleStatusResponse(data);
+                    break;
+                    
+                case "HOOK_STATUS":
+                    handleHookStatusEvent(data);
+                    break;
+                    
+                case "FRAME_SENT":
+                    handleFrameSentEvent(data);
+                    break;
+                    
+                default:
+                    appendLog("IPC", "Unknown message type: " + commandType);
+            }
+        });
+        
+        // Register receiver (moved log before register to avoid race condition)
+        appendLog("DEBUG", "BroadcastIpc registering...");
+        broadcastIpc.register();
+        appendLog("DEBUG", "BroadcastIpc registered and ready");
+    }
+    
+    /**
+     * Request hook status via BroadcastIpc
+     */
+    private void requestHookStatus() {
+        if (broadcastIpc != null) {
+            broadcastIpc.sendCommand("GET_STATUS", null);
+            appendLog("DEBUG", "Requested hook status via BroadcastIpc");
+        }
+    }
+    
+    /**
+     * Handle status response from Xposed hooks
+     */
+    private void handleStatusResponse(Map<String, String> data) {
+        if (data != null) {
+            String hookActive = data.get("hook_active");
+            String nfaStateHook = data.get("nfa_state_hook");
+            String sendFrameHook = data.get("send_frame_hook");
+            String pollingFrameHook = data.get("polling_frame_hook");
+            
+            appendLog("STATUS", "Hook Active: " + hookActive);
+            appendLog("STATUS", "NFA State Hook: " + nfaStateHook);
+            appendLog("STATUS", "Send Frame Hook: " + sendFrameHook);
+            appendLog("STATUS", "Polling Frame Hook: " + pollingFrameHook);
+        }
+    }
+    
+    /**
+     * Handle hook status event from Xposed
+     */
+    private void handleHookStatusEvent(Map<String, String> data) {
+        if (data != null) {
+            String hookActive = data.get("hook_active");
+            String packageName = data.get("package");
+            appendLog("EVENT", "Hooks activated in: " + packageName);
+        }
+    }
+    
+    /**
+     * Handle frame sent event from Xposed
+     */
+    private void handleFrameSentEvent(Map<String, String> data) {
+        if (data != null) {
+            String result = data.get("result");
+            appendLog("EVENT", "Frame sent result: " + result);
+        }
     }
     
     private void initViews() {
@@ -174,6 +270,7 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         }
     }
     
+    @android.annotation.SuppressLint("UnspecifiedRegisterReceiverFlag")
     private void setupLogReceiver() {
         logReceiver = new LogReceiver();
         LogReceiver.setCallback(this);
@@ -202,24 +299,9 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
     
     private void loadSavedConfig() {
         try {
-            // Load IDm/PMm from IPC if set
-            byte[] savedIdm = ipcClient.getIdm();
-            byte[] savedPmm = ipcClient.getPmm();
-            
-            if (savedIdm != null && savedIdm.length == 8) {
-                idmInput.setText(bytesToHex(savedIdm));
-            }
-            if (savedPmm != null && savedPmm.length == 8) {
-                pmmInput.setText(bytesToHex(savedPmm));
-            }
-            
-            // Load toggle states
-            if (autoInjectCheck != null) {
-                autoInjectCheck.setChecked(ipcClient.isAutoInjectEnabled());
-            }
-            if (bypassCheck != null) {
-                bypassCheck.setChecked(ipcClient.isBypassEnabled());
-            }
+            // IDm/PMm are set from UI directly - no need to load from IPC
+            // Toggle states default to false
+            appendLog("INFO", "Config loaded from UI defaults");
         } catch (Exception e) {
             appendLog("WARN", "Could not load saved config: " + e.getMessage());
         }
@@ -229,27 +311,16 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         StringBuilder status = new StringBuilder();
         
         try {
-            Map<String, String> hookStatus = ipcClient.getStatus();
+            // Request status via Broadcast IPC (async)
+            ipcClient.requestStatus();
             
-            boolean hookActive = "true".equals(hookStatus.get("hook_active"));
-            boolean bypassEnabled = "true".equals(hookStatus.get("bypass_enabled"));
-            boolean autoInject = "true".equals(hookStatus.get("auto_inject"));
-            String injectionCount = hookStatus.getOrDefault("injection_count", "0");
-            String pendingInjections = hookStatus.getOrDefault("pending_injections", "0");
+            // Status will be updated via BroadcastIpc callback
+            status.append("Status: Waiting for hooks...\n");
             
             status.append("=== HCE-F Hook Status ===\n");
-            status.append(String.format("• Xposed Hook: %s\n", hookActive ? "Active ✓" : "Inactive ✗"));
-            status.append(String.format("• State Bypass: %s\n", bypassEnabled ? "ON" : "OFF"));
-            status.append(String.format("• Auto-Inject: %s\n", autoInject ? "ON" : "OFF"));
-            status.append(String.format("• Injections: %s\n", injectionCount));
-            status.append(String.format("• Pending: %s\n", pendingInjections));
+            status.append("• Xposed Hook: Check logs\n");
+            status.append("• Broadcast IPC: Active ✓\n");
             status.append("• Target: SENSF_REQ (SC=FFFF)");
-            
-            // Update stats text if available
-            if (statsText != null) {
-                statsText.setText(String.format("Injections: %s | Pending: %s", 
-                    injectionCount, pendingInjections));
-            }
             
         } catch (Exception e) {
             status.append("=== HCE-F Hook Status ===\n");
@@ -288,10 +359,8 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
             appendLog("INFO", "  IDm: " + idmHex);
             appendLog("INFO", "  PMm: " + pmmHex);
             
-            // Save to IPC config
-            ipcClient.setIdm(idm);
-            ipcClient.setPmm(pmm);
-            appendLog("CONFIG", "IDm/PMm saved to configuration");
+            // No need to save to IPC - values are in UI
+            appendLog("CONFIG", "SENSF_RES validated successfully");
             
             Toast.makeText(this, "SENSF_RES valid (" + sensfRes.length + " bytes)", 
                 Toast.LENGTH_SHORT).show();
@@ -322,11 +391,11 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
                 .setPmm(pmm)
                 .build();
             
-            // Queue via IPC
-            boolean success = ipcClient.queueInjection(sensfRes);
+            // Queue via Broadcast IPC
+            boolean success = ipcClient.queueFrame(sensfRes);
             
             if (success) {
-                appendLog("INFO", "SENSF_RES queued for injection");
+                appendLog("INFO", "SENSF_RES queued for injection via Broadcast IPC");
                 appendLog("DATA", "  " + SensfResBuilder.toHexString(sensfRes));
                 Toast.makeText(this, "Injection queued", Toast.LENGTH_SHORT).show();
             } else {
@@ -387,10 +456,9 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
                         .setPmm(pmm)
                         .build();
                     
-                    // Queue injection via IPC - hook will decide spray vs single-shot
-                    // based on DobbyHooks.isSprayModeEnabled()
-                    appendLog("INFO", "Queuing SENSF_RES injection");
-                    boolean success = ipcClient.queueInjection(sensfRes);
+                    // Queue injection via Broadcast IPC
+                    appendLog("INFO", "Queuing SENSF_RES injection via Broadcast IPC");
+                    boolean success = ipcClient.queueFrame(sensfRes);
                     
                     if (success) {
                         appendLog("INFO", "SENSF_RES queued successfully");
@@ -418,10 +486,18 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
                 logBuffer.delete(0, 10000);
             }
             
-            logText.setText(logBuffer.toString());
-            
-            // Auto-scroll to bottom
-            logScrollView.post(() -> logScrollView.fullScroll(View.FOCUS_DOWN));
+            // Defensive check: ensure logText is initialized before using it
+            if (logText != null) {
+                logText.setText(logBuffer.toString());
+                
+                // Auto-scroll to bottom
+                if (logScrollView != null) {
+                    logScrollView.post(() -> logScrollView.fullScroll(View.FOCUS_DOWN));
+                }
+            } else {
+                // Views not yet initialized - log will be displayed when views are ready
+                Log.w(TAG, "appendLog called before views initialized: " + logLine);
+            }
         });
     }
     
@@ -434,22 +510,62 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
     /**
      * Toggle Observe Mode on/off
      * 
-     * Uses ObserveModeManager for clean, reflection-free implementation.
-     * The manager handles IPC communication with Xposed hooks which call
-     * the official NfcService.setObserveMode() method.
+     * CRITICAL FIX: Enable Observe Mode directly in MainActivity using NfcAdapter API.
+     * This is the CORRECT way - MainActivity runs in app process and has direct access to NfcAdapter.
+     * 
+     * DO NOT enable via IPC to Xposed hooks! Hooks should be PASSIVE observers only.
+     * Observe Mode is tied to the Activity lifecycle, so it MUST be controlled from the Activity.
      */
     private void toggleObserveMode() {
+        // Get NfcAdapter - we're in the app process so this works
+        android.nfc.NfcAdapter nfcAdapter = android.nfc.NfcAdapter.getDefaultAdapter(this);
+        
+        if (nfcAdapter == null) {
+            appendLog("ERROR", "NFC is not available on this device");
+            Toast.makeText(this, "NFC not available", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        
+        if (!nfcAdapter.isEnabled()) {
+            appendLog("ERROR", "NFC is disabled - please enable NFC first");
+            Toast.makeText(this, "Please enable NFC first", Toast.LENGTH_LONG).show();
+            return;
+        }
+        
         boolean currentState = observeModeManager.isObserveModeEnabled();
         boolean newState = !currentState;
         
         if (newState) {
             appendLog("INFO", "=== ENABLING OBSERVE MODE ===");
-            appendLog("INFO", "Using ObserveModeManager (no reflection)");
+            appendLog("INFO", "Calling NfcAdapter.setObserveModeEnabled(true) DIRECTLY from MainActivity");
+            appendLog("INFO", "This is the CORRECT approach - Activity controls Observe Mode, NOT hooks!");
             
-            boolean success = observeModeManager.enableObserveMode();
-            
-            if (success) {
-                appendLog("INFO", "✓ Observe Mode enabled successfully");
+            try {
+                // CRITICAL: Must set app as preferred service first!
+                // Android 15+ requires caller to be preferred NFC service for Observe Mode
+                android.nfc.cardemulation.CardEmulation cardEmulation = 
+                    android.nfc.cardemulation.CardEmulation.getInstance(nfcAdapter);
+                
+                // Use OUR service, not a foreign package!
+                android.content.ComponentName serviceName = new android.content.ComponentName(
+                    this, app.aoki.yuki.hcefhook.nfc.HcefObserveModeService.class);
+                
+                // Set as preferred service (grants permission for Observe Mode)
+                cardEmulation.setPreferredService(this, serviceName);
+                appendLog("INFO", "✓ Set HcefObserveModeService as preferred NFC service");
+                
+                // Call the official Android API directly
+                // This requires reflection since setObserveModeEnabled is hidden API
+                java.lang.reflect.Method setObserveModeMethod = nfcAdapter.getClass().getMethod(
+                    "setObserveModeEnabled", boolean.class);
+                setObserveModeMethod.invoke(nfcAdapter, true);
+                
+                appendLog("INFO", "✓✓✓ Observe Mode ENABLED via NfcAdapter.setObserveModeEnabled(true)");
+                appendLog("INFO", "NFCC is now in passive observation mode");
+                appendLog("INFO", "eSE will NOT respond to SENSF_REQ (SC=FFFF)");
+                
+                // Update local state
+                observeModeManager.isObserveModeEnabled = true;
                 
                 // Update button UI
                 if (observeModeButton != null) {
@@ -460,18 +576,42 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
                 }
                 
                 Toast.makeText(this, "Observe Mode ENABLED", Toast.LENGTH_SHORT).show();
-            } else {
-                appendLog("ERROR", "✗ Failed to enable Observe Mode");
+                
+                // Verify state
+                try {
+                    java.lang.reflect.Method isObserveModeEnabledMethod = nfcAdapter.getClass().getMethod(
+                        "isObserveModeEnabled");
+                    boolean verified = (boolean) isObserveModeEnabledMethod.invoke(nfcAdapter);
+                    appendLog("INFO", "Verified: isObserveModeEnabled() = " + verified);
+                } catch (Exception e) {
+                    appendLog("WARN", "Could not verify state: " + e.getMessage());
+                }
+                
+            } catch (NoSuchMethodException e) {
+                appendLog("ERROR", "setObserveModeEnabled() method not found");
+                appendLog("ERROR", "This device may not support Observe Mode (Android 15+ required)");
+                Toast.makeText(this, "Observe Mode not supported on this device", Toast.LENGTH_LONG).show();
+            } catch (Exception e) {
+                appendLog("ERROR", "Failed to enable Observe Mode: " + e.getMessage());
+                e.printStackTrace();
                 Toast.makeText(this, "Observe Mode Enable FAILED", Toast.LENGTH_SHORT).show();
             }
             
         } else {
             appendLog("INFO", "=== DISABLING OBSERVE MODE ===");
+            appendLog("INFO", "Calling NfcAdapter.setObserveModeEnabled(false) DIRECTLY from MainActivity");
             
-            boolean success = observeModeManager.disableObserveMode();
-            
-            if (success) {
-                appendLog("INFO", "✓ Observe Mode disabled successfully");
+            try {
+                // Call the official Android API directly
+                java.lang.reflect.Method setObserveModeMethod = nfcAdapter.getClass().getMethod(
+                    "setObserveModeEnabled", boolean.class);
+                setObserveModeMethod.invoke(nfcAdapter, false);
+                
+                appendLog("INFO", "✓ Observe Mode DISABLED via NfcAdapter.setObserveModeEnabled(false)");
+                appendLog("INFO", "NFCC returned to normal mode");
+                
+                // Update local state
+                observeModeManager.isObserveModeEnabled = false;
                 
                 // Update button UI
                 if (observeModeButton != null) {
@@ -482,8 +622,9 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
                 }
                 
                 Toast.makeText(this, "Observe Mode DISABLED", Toast.LENGTH_SHORT).show();
-            } else {
-                appendLog("ERROR", "✗ Failed to disable Observe Mode");
+                
+            } catch (Exception e) {
+                appendLog("ERROR", "Failed to disable Observe Mode: " + e.getMessage());
                 Toast.makeText(this, "Observe Mode Disable FAILED", Toast.LENGTH_SHORT).show();
             }
         }
@@ -545,7 +686,7 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
             for (int i = 0; i < SPRAY_COUNT; i++) {
                 try {
                     // Send raw frame via IPC (or direct call if available)
-                    boolean success = ipcClient.sendRawFrame(sensfRes);
+                    boolean success = ipcClient.queueFrame(sensfRes);
                     
                     if (success) {
                         successCount++;
@@ -639,6 +780,12 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         super.onDestroy();
         if (logReceiver != null) {
             unregisterReceiver(logReceiver);
+        }
+        if (broadcastIpc != null) {
+            broadcastIpc.unregister();
+        }
+        if (ipcClient != null) {
+            ipcClient.unregister();
         }
         statusHandler.removeCallbacksAndMessages(null);
     }

@@ -10,7 +10,6 @@ import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 
 import app.aoki.yuki.hcefhook.core.SensfResBuilder;
-import app.aoki.yuki.hcefhook.nativehook.DobbyHooks;
 
 /**
  * Spray Mode Controller for Continuous SENSF_RES Transmission
@@ -84,16 +83,7 @@ public class SprayController {
         // Stop any existing spray
         stopSpray();
         
-        // Enable bypass mode in native hooks
-        try {
-            if (DobbyHooks.isLoaded()) {
-                DobbyHooks.enableSprayMode();
-            }
-        } catch (Exception e) {
-            XposedBridge.log(TAG + ": Warning - could not enable native spray mode: " + e.getMessage());
-        }
-        
-        // Enable state bypass in Java hooks
+        // Enable state bypass in Java hooks  
         NfaStateHook.spoofListenActiveState();
         
         currentSensfRes = sensfRes;
@@ -174,15 +164,6 @@ public class SprayController {
         
         // Restore state
         NfaStateHook.restoreState();
-        
-        // Disable spray mode in native hooks
-        try {
-            if (DobbyHooks.isLoaded()) {
-                DobbyHooks.disableSprayMode();
-            }
-        } catch (Exception e) {
-            // Ignore
-        }
         
         int finalCount = transmissionCount.get();
         XposedBridge.log(TAG + ": *** SPRAY MODE STOPPED ***");
