@@ -545,16 +545,13 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
                 android.nfc.cardemulation.CardEmulation cardEmulation = 
                     android.nfc.cardemulation.CardEmulation.getInstance(nfcAdapter);
                 
+                // Use OUR service, not a foreign package!
                 android.content.ComponentName serviceName = new android.content.ComponentName(
-                    this, "tech.oliet.generalfelicasimulator.HCEFService");
+                    this, app.aoki.yuki.hcefhook.nfc.HcefObserveModeService.class);
                 
-                // Try to set as preferred service (may fail if service doesn't exist, that's OK)
-                try {
-                    cardEmulation.setPreferredService(this, serviceName);
-                    appendLog("INFO", "✓ Set as preferred NFC service");
-                } catch (Exception e) {
-                    appendLog("WARN", "Could not set preferred service (may not be needed): " + e.getMessage());
-                }
+                // Set as preferred service (grants permission for Observe Mode)
+                cardEmulation.setPreferredService(this, serviceName);
+                appendLog("INFO", "✓ Set HcefObserveModeService as preferred NFC service");
                 
                 // Call the official Android API directly
                 // This requires reflection since setObserveModeEnabled is hidden API
