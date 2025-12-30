@@ -153,22 +153,4 @@ public class IpcClient {
         }
         return sb.toString();
     }
-    
-    /**
-     * @deprecated Use sendCommand() with Broadcast IPC instead
-     */
-    @Deprecated
-    public boolean enableObserveMode() {
-        Log.w(TAG, "enableObserveMode() is deprecated - Observe Mode should be enabled in MainActivity directly");
-        return false;
-    }
-    
-    /**
-     * @deprecated Use sendCommand() with Broadcast IPC instead
-     */
-    @Deprecated
-    public boolean disableObserveMode() {
-        Log.w(TAG, "disableObserveMode() is deprecated - Observe Mode should be disabled in MainActivity directly");
-        return false;
-    }
 }
