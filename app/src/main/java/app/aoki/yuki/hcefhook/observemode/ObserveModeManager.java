@@ -79,40 +79,7 @@ public class ObserveModeManager {
         Log.i(TAG, "Polling frame callback set");
     }
     
-    /**
-     * Enable Observe Mode
-     * 
-     * DEPRECATED: MainActivity should call NfcAdapter.setObserveModeEnabled(true) directly.
-     * This method is kept for compatibility but does nothing.
-     * 
-     * WHY: Observe Mode is tied to Activity lifecycle and must be controlled from the Activity.
-     * The Activity runs in app process and has direct access to NfcAdapter.
-     * Using IPC to enable it from hooks is architecturally wrong.
-     * 
-     * @return always returns false to indicate this method should not be used
-     */
-    @Deprecated
-    public boolean enableObserveMode() {
-        Log.w(TAG, "enableObserveMode() called - THIS IS DEPRECATED!");
-        Log.w(TAG, "MainActivity should call NfcAdapter.setObserveModeEnabled(true) directly");
-        Log.w(TAG, "Using IPC to enable Observe Mode is architecturally incorrect");
-        return false;
-    }
-    
-    /**
-     * Disable Observe Mode
-     * 
-     * DEPRECATED: MainActivity should call NfcAdapter.setObserveModeEnabled(false) directly.
-     * 
-     * @return always returns false to indicate this method should not be used
-     */
-    @Deprecated
-    public boolean disableObserveMode() {
-        Log.w(TAG, "disableObserveMode() called - THIS IS DEPRECATED!");
-        Log.w(TAG, "MainActivity should call NfcAdapter.setObserveModeEnabled(false) directly");
-        return false;
-    }
-    
+
     /**
      * Check if Observe Mode is currently enabled
      * 
@@ -122,34 +89,7 @@ public class ObserveModeManager {
         return isObserveModeEnabled;
     }
     
-    /**
-     * Update local state to match actual NfcAdapter state
-     * Should be called after enable/disable operations
-     * 
-     * DEPRECATED: MainActivity updates isObserveModeEnabled directly
-     */
-    @Deprecated
-    private void updateObserveModeState(boolean newState) {
-        isObserveModeEnabled = newState;
-        Log.i(TAG, "ObserveMode state updated: " + newState);
-    }
-    
-    /**
-     * Request Observe Mode state change
-     * 
-     * DEPRECATED: This IPC-based approach is architecturally incorrect.
-     * MainActivity should call NfcAdapter APIs directly, not via IPC.
-     * 
-     * @param enable true to enable, false to disable
-     * @return always false
-     */
-    @Deprecated
-    private boolean requestObserveModeChange(boolean enable) {
-        Log.w(TAG, "requestObserveModeChange() - DEPRECATED IPC-based method");
-        Log.w(TAG, "MainActivity should use NfcAdapter.setObserveModeEnabled() directly");
-        return false;
-    }
-    
+
     /**
      * Handle incoming polling frame notification
      * 
@@ -168,39 +108,5 @@ public class ObserveModeManager {
         }
     }
     
-    /**
-     * Check if Observe Mode is available on this device
-     * 
-     * Uses the official NfcAdapter.isObserveModeSupported() API
-     * 
-     * @return true if Observe Mode is supported
-     */
-    public boolean isObserveModeAvailable() {
-        if (nfcAdapter == null) {
-            return false;
-        }
-        
-        try {
-            // Use official API via IPC to Xposed hooks
-            // The hooks will call NfcAdapter.isObserveModeSupported()
-            app.aoki.yuki.hcefhook.ipc.IpcClient ipcClient = 
-                new app.aoki.yuki.hcefhook.ipc.IpcClient(context);
-            
-            // For now, assume supported if we can get NfcAdapter
-            // TODO: Add IPC method to check isObserveModeSupported()
-            return nfcAdapter.isEnabled();
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to check Observe Mode availability", e);
-            return false;
-        }
-    }
-    
-    /**
-     * Check if Observe Mode is currently enabled
-     * 
-     * @return true if Observe Mode is currently enabled (local state)
-     */
-    public boolean checkCurrentObserveModeState() {
-        return isObserveModeEnabled;
-    }
+
 }

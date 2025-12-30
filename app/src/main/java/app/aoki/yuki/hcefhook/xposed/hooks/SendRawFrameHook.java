@@ -66,21 +66,11 @@ public class SendRawFrameHook {
         XposedBridge.log(TAG + ": SENSF_RES queued for injection: " + 
             SensfResBuilder.toHexString(sensfRes));
         
-        // CRITICAL INTEGRATION: Use SprayController if spray mode is enabled
-        try {
-            if (app.aoki.yuki.hcefhook.nativehook.DobbyHooks.isSprayModeEnabled()) {
-                XposedBridge.log(TAG + ": ✓ Spray mode enabled - using SprayController");
-                SprayController.startSpray(sensfRes);
-                // Don't clear pending injection - spray controller handles it
-                return;
-            }
-        } catch (Exception e) {
-            XposedBridge.log(TAG + ": Could not check spray mode: " + e.getMessage());
-        }
-        
-        // LEGACY: Fall back to single-shot injection
-        XposedBridge.log(TAG + ": Using single-shot injection");
-        attemptInjection();
+        // Use SprayController for continuous transmission
+        XposedBridge.log(TAG + ": Using SprayController for continuous transmission");
+        SprayController.startSpray(sensfRes);
+        // Don't clear pending injection - spray controller handles it
+        return;
     }
     
     /**
