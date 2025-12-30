@@ -107,12 +107,12 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         // Initialize IPC AFTER views (appendLog requires logText to be initialized)
         ipcClient = new IpcClient(this);
         
-        // Initialize BroadcastIpc for bidirectional communication
-        setupBroadcastIpc();
-        
         // Now safe to log after views are initialized
         appendLog("INFO", "MainActivity.onCreate() - Starting initialization");
         appendLog("DEBUG", "IPC client initialized (ContentProvider - deprecated)");
+        
+        // Initialize BroadcastIpc for bidirectional communication (AFTER logging is safe)
+        setupBroadcastIpc();
         appendLog("INFO", "BroadcastIpc initialized for bidirectional communication");
         
         updateStatus();
@@ -540,6 +540,22 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
             appendLog("INFO", "This is the CORRECT approach - Activity controls Observe Mode, NOT hooks!");
             
             try {
+                // CRITICAL: Must set app as preferred service first!
+                // Android 15+ requires caller to be preferred NFC service for Observe Mode
+                android.nfc.cardemulation.CardEmulation cardEmulation = 
+                    android.nfc.cardemulation.CardEmulation.getInstance(nfcAdapter);
+                
+                android.content.ComponentName serviceName = new android.content.ComponentName(
+                    this, "tech.oliet.generalfelicasimulator.HCEFService");
+                
+                // Try to set as preferred service (may fail if service doesn't exist, that's OK)
+                try {
+                    cardEmulation.setPreferredService(this, serviceName);
+                    appendLog("INFO", "✓ Set as preferred NFC service");
+                } catch (Exception e) {
+                    appendLog("WARN", "Could not set preferred service (may not be needed): " + e.getMessage());
+                }
+                
                 // Call the official Android API directly
                 // This requires reflection since setObserveModeEnabled is hidden API
                 java.lang.reflect.Method setObserveModeMethod = nfcAdapter.getClass().getMethod(
