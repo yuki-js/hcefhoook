@@ -60,7 +60,7 @@ hcefhoook/
 [MainActivity (app process)]
     ↓ initialize ObserveModeManager
 [ObserveModeManager]
-    ↓ enable Observe Mode
+    ↓ MainActivity calls NfcAdapter.setObserveModeEnabled() directly (NOT via IPC!)
 [NFCC in Observe Mode]
     ↓ NCI_ANDROID_POLLING_FRAME_NTF
 [PollingFrameHook (android.nfc process)]
@@ -70,9 +70,9 @@ hcefhoook/
     ↓ onReceive()
 [MainActivity.onSensfDetected()]
     ↓ auto-inject enabled?
-    ↓ queue injection via IPC (ContentProvider)
+    ↓ queue injection via IPC (Broadcast IPC - ContentProvider removed!)
 [SendRawFrameHook (android.nfc process)]
-    ↓ inject SENSF_RES (spray mode or single-shot)
+    ↓ inject SENSF_RES (spray mode - single-shot removed)
 [SprayController]
     ↓ continuous transmission (2ms interval)
 [NativeNfcManager.doTransceive()]
