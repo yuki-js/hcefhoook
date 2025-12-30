@@ -270,6 +270,7 @@ public class MainActivity extends AppCompatActivity implements LogReceiver.LogCa
         }
     }
     
+    @android.annotation.SuppressLint("UnspecifiedRegisterReceiverFlag")
     private void setupLogReceiver() {
         logReceiver = new LogReceiver();
         LogReceiver.setCallback(this);

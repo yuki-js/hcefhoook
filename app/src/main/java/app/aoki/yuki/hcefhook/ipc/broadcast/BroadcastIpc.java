@@ -136,6 +136,7 @@ public class BroadcastIpc {
      * 
      * Call this in onCreate() or after setting command handler
      */
+    @android.annotation.SuppressLint("UnspecifiedRegisterReceiverFlag")
     public void register() {
         if (registered) {
             Log.w(TAG, "[" + processName + "] Already registered");
