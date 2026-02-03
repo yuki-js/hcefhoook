@@ -1,0 +1,26 @@
+{
+  "name": "hcefhook",
+  "image": "ghcr.io/yuki-js/hcefhook-devcontainer:latest",
+  "remoteUser": "user",
+  "updateRemoteUserUID": true,
+  "workspaceFolder": "/home/user/codes/hcefhook",
+  "workspaceMount": "type=bind,source=${localWorkspaceFolder},target=/home/user/codes/hcefhook",
+  "containerEnv": {
+    "ANDROID_SDK_ROOT": "/opt/android-sdk",
+    "ANDROID_HOME": "/opt/android-sdk",
+    "JAVA_HOME": "/usr/lib/jvm/java-21-openjdk-amd64",
+    "ANDROID_STUDIO_HOME": "/opt/android-studio",
+    "GRADLE_USER_HOME": "/home/user/.gradle",
+    "DISPLAY": "${localEnv:DISPLAY}",
+    "WAYLAND_DISPLAY": "${localEnv:WAYLAND_DISPLAY}",
+    "XDG_RUNTIME_DIR": "${localEnv:XDG_RUNTIME_DIR}",
+    "PULSE_SERVER": "${localEnv:PULSE_SERVER}"
+  },
+  "mounts": [
+    "source=gradle-cache,target=/home/user/.gradle,type=volume"
+  ],
+  "postCreateCommand": "git config --global --add safe.directory /home/user/codes/hcefhook && git config --global core.filemode false",
+  "runArgs": [
+    "--volume=/mnt/wslg:/mnt/wslg"
+  ]
+}

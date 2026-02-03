@@ -132,6 +132,33 @@ frida -U -f com.android.nfc -l scripts/frida_native_hook.js --no-pause
   - Frida (native hooks)
   - LSPosed/Xposed Framework (Java/Kotlin hooks)
 
+## Dev Container / WSLg 開発環境
+
+ホストマシンを汚さずに開発できるよう、Dev Container を提供しています。WSL2 + WSLg 環境で Android Studio のGUI起動を行う場合は、Windows 側の WSLg を利用します。
+
+### 前提条件
+
+- VS Code + Dev Containers 拡張
+- WSL2 環境（WSLg 有効）
+- 非 WSL 環境では `.devcontainer/devcontainer.json` の `runArgs` を削除して起動
+
+### 使い方
+
+1. VS Code でリポジトリを開く
+2. **Dev Containers: Reopen in Container** を実行
+3. コンテナ内で Android Studio を起動:
+
+```bash
+android-studio
+```
+
+### メモ
+
+- Dev Container イメージは `ghcr.io/yuki-js/dotfiles/dotimage:latest` をベースに CI でビルドされ、`ghcr.io/yuki-js/hcefhook-devcontainer:latest` から取得します。
+- WSLg 連携のために `/mnt/wslg` をコンテナにマウントしています。
+- Android SDK は `/opt/android-sdk` にセットアップされます。
+- Dev Container 内で `./gradlew assembleDebug assembleRelease` を実行し、Android Activity 以外のパーツも含めてビルドできることを確認しました（UID 更新後に実行）。
+
 ## 参考資料
 
 - [AOSP system/nfc](https://android.googlesource.com/platform/system/nfc/)
