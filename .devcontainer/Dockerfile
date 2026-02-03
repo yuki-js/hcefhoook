@@ -30,7 +30,7 @@ USER root
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         git \
-        libasound2 \
+        libasound2t64 \
         libatk-bridge2.0-0 \
         libatk1.0-0 \
         libcups2 \
@@ -47,13 +47,13 @@ RUN apt-get update \
         libxrandr2 \
         libxshmfence1 \
         libxtst6 \
-        openjdk-17-jdk \
+        openjdk-21-jdk \
         xdg-utils \
         && rm -rf /var/lib/apt/lists/*
 
 ENV ANDROID_SDK_ROOT=/opt/android-sdk
 ENV ANDROID_HOME=/opt/android-sdk
-ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+ENV JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
 ENV ANDROID_STUDIO_HOME=/opt/android-studio
 ENV PATH="/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/build-tools/34.0.0:$PATH"
 ENV ANDROID_NDK_ROOT=/opt/android-sdk/ndk/25.1.8937393

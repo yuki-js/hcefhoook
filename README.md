@@ -157,6 +157,7 @@ android-studio
 - Dev Container イメージは `ghcr.io/yuki-js/dotfiles/dotimage:latest` をベースに CI でビルドされ、`ghcr.io/yuki-js/hcefhook-devcontainer:latest` から取得します。
 - WSLg 連携のために `/mnt/wslg` をコンテナにマウントしています。
 - Android SDK は `/opt/android-sdk` にセットアップされます。
+- Dev Container 内で `./gradlew assembleDebug assembleRelease` を実行し、Android Activity 以外のパーツも含めてビルドできることを確認しました（UID 更新後に実行）。
 
 ## 参考資料
 
