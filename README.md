@@ -140,6 +140,7 @@ frida -U -f com.android.nfc -l scripts/frida_native_hook.js --no-pause
 
 - VS Code + Dev Containers 拡張
 - WSL2 環境（WSLg 有効）
+- 非 WSL 環境では `.devcontainer/devcontainer.json` の `runArgs` を削除して起動
 
 ### 使い方
 

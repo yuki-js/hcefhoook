@@ -3,6 +3,8 @@ FROM mcr.microsoft.com/devcontainers/base:ubuntu-22.04
 ARG USERNAME=vscode
 ARG USER_UID=1000
 ARG USER_GID=1000
+ARG ANDROID_CMDLINE_TOOLS_VERSION=11076708
+ARG ANDROID_STUDIO_VERSION=2023.2.1.25
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -36,7 +38,7 @@ RUN apt-get update \
         && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /opt/android-sdk/cmdline-tools \
-    && curl -sSLo /tmp/cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip \
+    && curl -sSLo /tmp/cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_TOOLS_VERSION}_latest.zip \
     && unzip -q /tmp/cmdline-tools.zip -d /opt/android-sdk/cmdline-tools \
     && mv /opt/android-sdk/cmdline-tools/cmdline-tools /opt/android-sdk/cmdline-tools/latest \
     && rm /tmp/cmdline-tools.zip
@@ -53,7 +55,9 @@ RUN yes | sdkmanager --licenses \
         "ndk;25.1.8937393" \
         "cmake;3.22.1"
 
-RUN curl -sSLo /tmp/android-studio.tar.gz https://redirector.gvt1.com/edgedl/android/studio/ide-zips/2023.2.1.25/android-studio-2023.2.1.25-linux.tar.gz \
+RUN ANDROID_STUDIO_URL="https://redirector.gvt1.com/edgedl/android/studio/ide-zips/${ANDROID_STUDIO_VERSION}/android-studio-${ANDROID_STUDIO_VERSION}-linux.tar.gz" \
+    && curl -fsSLo /tmp/android-studio.tar.gz "${ANDROID_STUDIO_URL}" \
+    && if [ ! -s /tmp/android-studio.tar.gz ]; then echo "Android Studio download failed: ${ANDROID_STUDIO_URL}. Check network access or version." >&2; exit 1; fi \
     && tar -xzf /tmp/android-studio.tar.gz -C /opt \
     && ln -s /opt/android-studio/bin/studio.sh /usr/local/bin/android-studio \
     && rm /tmp/android-studio.tar.gz

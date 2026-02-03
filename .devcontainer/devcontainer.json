@@ -1,5 +1,5 @@
 {
-  "name": "hcefhoook-devcontainer",
+  "name": "hcefhook-devcontainer",
   "build": {
     "dockerfile": "Dockerfile"
   },
@@ -15,7 +15,9 @@
     "PULSE_SERVER": "${localEnv:PULSE_SERVER}"
   },
   "mounts": [
-    "source=/mnt/wslg,target=/mnt/wslg,type=bind,consistency=cached",
     "source=gradle-cache,target=/home/vscode/.gradle,type=volume"
+  ],
+  "runArgs": [
+    "--volume=/mnt/wslg:/mnt/wslg"
   ]
 }
