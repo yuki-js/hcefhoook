@@ -154,6 +154,7 @@ android-studio
 
 ### メモ
 
+- Dev Container イメージは `ghcr.io/yuki-js/dotfiles/dotimage:latest` をベースに CI でビルドされ、`ghcr.io/yuki-js/hcefhoook-devcontainer:latest` から取得します。
 - WSLg 連携のために `/mnt/wslg` をコンテナにマウントしています。
 - Android SDK は `/opt/android-sdk` にセットアップされます。
 

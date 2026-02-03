@@ -1,9 +1,9 @@
 {
-  "name": "hcefhook-devcontainer",
-  "build": {
-    "dockerfile": "Dockerfile"
-  },
-  "remoteUser": "vscode",
+  "name": "hcefhook",
+  "image": "ghcr.io/yuki-js/hcefhoook-devcontainer:latest",
+  "remoteUser": "user",
+  "workspaceFolder": "/home/user/codes/hcefhoook",
+  "workspaceMount": "type=bind,source=${localWorkspaceFolder},target=/home/user/codes/hcefhoook",
   "containerEnv": {
     "ANDROID_SDK_ROOT": "/opt/android-sdk",
     "ANDROID_HOME": "/opt/android-sdk",
@@ -15,9 +15,16 @@
     "PULSE_SERVER": "${localEnv:PULSE_SERVER}"
   },
   "mounts": [
-    "source=gradle-cache,target=/home/vscode/.gradle,type=volume"
+    "source=gradle-cache,target=/home/user/.gradle,type=volume"
   ],
   "runArgs": [
     "--volume=/mnt/wslg:/mnt/wslg"
-  ]
+  ],
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "zsh"
+      }
+    }
+  }
 }

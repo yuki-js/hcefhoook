@@ -1,20 +1,38 @@
-FROM mcr.microsoft.com/devcontainers/base:ubuntu-22.04
-
-ARG USERNAME=vscode
-ARG USER_UID=1000
-ARG USER_GID=1000
-ARG ANDROID_CMDLINE_TOOLS_VERSION=11076708
-ARG ANDROID_STUDIO_VERSION=2023.2.1.25
-
+FROM ghcr.io/yuki-js/dotfiles/dotimage:latest AS download
+USER root
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         ca-certificates \
-        curl \
+        wget \
+        unzip \
+        xz-utils \
         git \
-        gnupg \
+        && rm -rf /var/lib/apt/lists/*
+
+ARG CMDLINE_TOOLS_REV=13114758
+ARG ANDROID_STUDIO_VERSION=2023.2.1.25
+RUN mkdir -p /opt/android-sdk \
+    && cd /opt/android-sdk \
+    && wget -qO cmdline-tools.zip "https://dl.google.com/android/repository/commandlinetools-linux-${CMDLINE_TOOLS_REV}_latest.zip" \
+    && unzip -q cmdline-tools.zip -d /opt/android-sdk/cmdline-tools-tmp \
+    && mkdir -p /opt/android-sdk/cmdline-tools/latest \
+    && mv /opt/android-sdk/cmdline-tools-tmp/cmdline-tools/* /opt/android-sdk/cmdline-tools/latest/ \
+    && rm -rf /opt/android-sdk/cmdline-tools-tmp cmdline-tools.zip
+
+RUN ANDROID_STUDIO_URL="https://redirector.gvt1.com/edgedl/android/studio/ide-zips/${ANDROID_STUDIO_VERSION}/android-studio-${ANDROID_STUDIO_VERSION}-linux.tar.gz" \
+    && wget -qO /tmp/android-studio.tar.gz "${ANDROID_STUDIO_URL}" \
+    && if [ ! -s /tmp/android-studio.tar.gz ]; then echo "Android Studio download failed: ${ANDROID_STUDIO_URL}. Check network access or version." >&2; exit 1; fi \
+    && tar -xzf /tmp/android-studio.tar.gz -C /opt \
+    && rm /tmp/android-studio.tar.gz
+
+FROM ghcr.io/yuki-js/dotfiles/dotimage:latest
+USER root
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        git \
         libasound2 \
-        libatk1.0-0 \
         libatk-bridge2.0-0 \
+        libatk1.0-0 \
         libcups2 \
         libdbus-1-3 \
         libdrm2 \
@@ -29,40 +47,30 @@ RUN apt-get update \
         libxrandr2 \
         libxshmfence1 \
         libxtst6 \
-        mesa-utils \
         openjdk-17-jdk \
-        unzip \
-        wget \
         xdg-utils \
-        && apt-get clean \
         && rm -rf /var/lib/apt/lists/*
-
-RUN mkdir -p /opt/android-sdk/cmdline-tools \
-    && curl -sSLo /tmp/cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_TOOLS_VERSION}_latest.zip \
-    && unzip -q /tmp/cmdline-tools.zip -d /opt/android-sdk/cmdline-tools \
-    && mv /opt/android-sdk/cmdline-tools/cmdline-tools /opt/android-sdk/cmdline-tools/latest \
-    && rm /tmp/cmdline-tools.zip
 
 ENV ANDROID_SDK_ROOT=/opt/android-sdk
 ENV ANDROID_HOME=/opt/android-sdk
-ENV PATH=$PATH:/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/build-tools/34.0.0
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+ENV ANDROID_STUDIO_HOME=/opt/android-studio
+ENV PATH="/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-tools:/opt/android-sdk/build-tools/34.0.0:$PATH"
+ENV ANDROID_NDK_ROOT=/opt/android-sdk/ndk/25.1.8937393
+ENV ANDROID_NDK_HOME=/opt/android-sdk/ndk/25.1.8937393
+ENV CMAKE_HOME=/opt/android-sdk/cmake/3.22.1
 
-RUN yes | sdkmanager --licenses \
-    && sdkmanager \
-        "platform-tools" \
-        "platforms;android-34" \
-        "build-tools;34.0.0" \
-        "ndk;25.1.8937393" \
-        "cmake;3.22.1"
+COPY --from=download --chown=user:user /opt/android-sdk/cmdline-tools/latest /opt/android-sdk/cmdline-tools/latest
+COPY --from=download --chown=user:user /opt/android-studio /opt/android-studio
 
-RUN ANDROID_STUDIO_URL="https://redirector.gvt1.com/edgedl/android/studio/ide-zips/${ANDROID_STUDIO_VERSION}/android-studio-${ANDROID_STUDIO_VERSION}-linux.tar.gz" \
-    && curl -fsSLo /tmp/android-studio.tar.gz "${ANDROID_STUDIO_URL}" \
-    && if [ ! -s /tmp/android-studio.tar.gz ]; then echo "Android Studio download failed: ${ANDROID_STUDIO_URL}. Check network access or version." >&2; exit 1; fi \
-    && tar -xzf /tmp/android-studio.tar.gz -C /opt \
-    && ln -s /opt/android-studio/bin/studio.sh /usr/local/bin/android-studio \
-    && rm /tmp/android-studio.tar.gz
+RUN set -eux; \
+    yes | sdkmanager --licenses > /dev/null || true; \
+    sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "cmake;3.22.1" "ndk;25.1.8937393"
 
-RUN groupmod --gid ${USER_GID} ${USERNAME} \
-    && usermod --uid ${USER_UID} --gid ${USER_GID} ${USERNAME} \
-    && mkdir -p /home/${USERNAME}/.android \
-    && chown -R ${USERNAME}:${USERNAME} /home/${USERNAME} /opt/android-sdk /opt/android-studio
+RUN ln -s /opt/android-studio/bin/studio.sh /usr/local/bin/android-studio \
+    && mkdir -p /home/user/.android \
+    && chown -R user:user /home/user/.android /opt/android-sdk /opt/android-studio
+
+USER user
+
+CMD ["/bin/zsh"]
