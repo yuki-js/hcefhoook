@@ -1,9 +1,9 @@
 {
   "name": "hcefhook",
-  "image": "ghcr.io/yuki-js/hcefhoook-devcontainer:latest",
+  "image": "ghcr.io/yuki-js/hcefhook-devcontainer:latest",
   "remoteUser": "user",
-  "workspaceFolder": "/home/user/codes/hcefhoook",
-  "workspaceMount": "type=bind,source=${localWorkspaceFolder},target=/home/user/codes/hcefhoook",
+  "workspaceFolder": "/home/user/codes/hcefhook",
+  "workspaceMount": "type=bind,source=${localWorkspaceFolder},target=/home/user/codes/hcefhook",
   "containerEnv": {
     "ANDROID_SDK_ROOT": "/opt/android-sdk",
     "ANDROID_HOME": "/opt/android-sdk",

@@ -64,8 +64,9 @@ COPY --from=download --chown=user:user /opt/android-sdk/cmdline-tools/latest /op
 COPY --from=download --chown=user:user /opt/android-studio /opt/android-studio
 
 RUN set -eux; \
-    yes | sdkmanager --licenses > /dev/null || true; \
-    sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "cmake;3.22.1" "ndk;25.1.8937393"
+    yes | sdkmanager --licenses \
+    && sdkmanager --channel=0 "platform-tools" "platforms;android-34" "build-tools;34.0.0" "cmake;3.22.1" "ndk;25.1.8937393" \
+    && sdkmanager --list_installed
 
 RUN ln -s /opt/android-studio/bin/studio.sh /usr/local/bin/android-studio \
     && mkdir -p /home/user/.android \
