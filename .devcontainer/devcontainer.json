@@ -1,0 +1,21 @@
+{
+  "name": "hcefhoook-devcontainer",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "remoteUser": "vscode",
+  "containerEnv": {
+    "ANDROID_SDK_ROOT": "/opt/android-sdk",
+    "ANDROID_HOME": "/opt/android-sdk",
+    "JAVA_HOME": "/usr/lib/jvm/java-17-openjdk-amd64",
+    "ANDROID_STUDIO_HOME": "/opt/android-studio",
+    "DISPLAY": "${localEnv:DISPLAY}",
+    "WAYLAND_DISPLAY": "${localEnv:WAYLAND_DISPLAY}",
+    "XDG_RUNTIME_DIR": "${localEnv:XDG_RUNTIME_DIR}",
+    "PULSE_SERVER": "${localEnv:PULSE_SERVER}"
+  },
+  "mounts": [
+    "source=/mnt/wslg,target=/mnt/wslg,type=bind,consistency=cached",
+    "source=gradle-cache,target=/home/vscode/.gradle,type=volume"
+  ]
+}
